@@ -6,7 +6,6 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
-  CircleAlert,
   Contact,
   FileText,
   Minus,
@@ -243,16 +242,8 @@ export default function CreatePage() {
                           </Field>
 
                           <Field label="Fecha publicación">
-                            <div className="relative">
-                              <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8a7f85]" />
-                              <input
-                                value={fecha}
-                                onChange={(event) => setFecha(event.target.value)}
-                                type="date"
-                                className="tc-input pl-9"
-                              />
-                            </div>
-                          </Field>
+  <DatePicker value={fecha} onChange={setFecha} />
+</Field>
                         </div>
 
                         <Field label="Precio revista / opcional">
@@ -860,26 +851,25 @@ function SummaryPanel({
 
         <div className="mt-5 grid gap-2">
           <button
-            disabled={!canCreate}
-            className="tc-primary-button disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Crear revista
-          </button>
+  type="button"
+  onClick={() => {
+    window.location.href = "/products";
+  }}
+  className="min-h-11 rounded-[16px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/15 active:scale-[0.985]"
+>
+  Añadir productos
+</button>
 
           <button
-            disabled
-            className="min-h-11 rounded-[16px] border border-[#b9b0b5] bg-[#ebe7e8] px-4 text-[13px] font-black text-[#81777b] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Añadir productos
-          </button>
+  type="button"
+  onClick={() => {
+    window.location.href = "/products";
+  }}
+  className="min-h-11 rounded-[16px] border border-white/20 bg-[#ded9db] px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition active:scale-[0.985]"
+>
+  Añadir productos
+</button>
         </div>
-
-        {!canCreate ? (
-          <div className="mt-4 flex gap-2 rounded-[15px] border border-[#c7bfc3] bg-[#e9e4e6] p-3 text-[11px] font-bold leading-relaxed text-[#756b70]">
-            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#A52E64]" />
-            Nombre y fecha son obligatorios para crear la revista.
-          </div>
-        ) : null}
       </section>
     </aside>
   );
@@ -921,6 +911,203 @@ function MobileFooter({ canCreate, progress }: { canCreate: boolean; progress: n
           Añadir productos
         </button>
       </div>
+    </div>
+  );
+}
+function DatePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const maxDate = new Date(today);
+  maxDate.setMonth(maxDate.getMonth() + 13);
+  maxDate.setHours(0, 0, 0, 0);
+
+  const selected = value ? new Date(`${value}T00:00:00`) : null;
+
+  const [open, setOpen] = useState(false);
+  const [viewDate, setViewDate] = useState(selected ?? today);
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+
+  const minViewMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const maxViewMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+  const currentViewMonth = new Date(year, month, 1);
+
+  const canGoPrev = currentViewMonth > minViewMonth;
+  const canGoNext = currentViewMonth < maxViewMonth;
+
+  const monthName = viewDate.toLocaleDateString("es-PY", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const firstDay = new Date(year, month, 1);
+  const startOffset = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - startOffset + 1;
+    return day >= 1 && day <= daysInMonth ? day : null;
+  });
+
+  function formatDate(date: Date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function displayDate() {
+    if (!value) return "dd/mm/aaaa";
+
+    const [y, m, d] = value.split("-");
+    return `${d}/${m}/${y}`;
+  }
+
+  function moveMonth(amount: number) {
+    const next = new Date(year, month + amount, 1);
+
+    if (next < minViewMonth || next > maxViewMonth) return;
+
+    setViewDate(next);
+  }
+
+  function isDateAllowed(date: Date) {
+    const clean = new Date(date);
+    clean.setHours(0, 0, 0, 0);
+
+    return clean >= today && clean <= maxDate;
+  }
+
+  function selectDate(date: Date) {
+    if (!isDateAllowed(date)) return;
+
+    onChange(formatDate(date));
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="tc-input flex items-center gap-3 text-left"
+      >
+        <CalendarDays className="h-4 w-4 shrink-0 text-[#8a7f85]" />
+        <span className={value ? "text-[#201a1d]" : "text-[#91878c]"}>
+          {displayDate()}
+        </span>
+      </button>
+
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="absolute left-0 top-[calc(100%+8px)] z-50 w-full min-w-[280px] overflow-hidden rounded-[20px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_24px_54px_rgba(0,0,0,.24),inset_0_1px_0_rgba(255,255,255,.54)]"
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => moveMonth(-1)}
+                disabled={!canGoPrev}
+                className="grid h-9 w-9 place-items-center rounded-[12px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                ←
+              </button>
+
+              <span className="text-[12px] font-black capitalize tracking-[-0.02em] text-[#241f22]">
+                {monthName}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => moveMonth(1)}
+                disabled={!canGoNext}
+                className="grid h-9 w-9 place-items-center rounded-[12px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                →
+              </button>
+            </div>
+
+            <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[9px] font-black uppercase text-[#81777b]">
+              {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map((day) => (
+                <span key={day}>{day}</span>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {cells.map((day, index) => {
+                const cellDate = day ? new Date(year, month, day) : null;
+                const iso = cellDate ? formatDate(cellDate) : "";
+                const isSelected = iso === value;
+                const allowed = cellDate ? isDateAllowed(cellDate) : false;
+                const isToday = cellDate ? formatDate(cellDate) === formatDate(today) : false;
+
+                return (
+                  <button
+                    key={`${day ?? "empty"}-${index}`}
+                    type="button"
+                    disabled={!day || !allowed}
+                    onClick={() => {
+                      if (!cellDate) return;
+                      selectDate(cellDate);
+                    }}
+                    className={`grid h-9 place-items-center rounded-[11px] text-[12px] font-black transition active:scale-95 disabled:cursor-not-allowed ${
+                      !day
+                        ? "opacity-0"
+                        : isSelected
+                          ? "bg-[#A52E64] text-[#f7f2f4] shadow-[0_10px_20px_rgba(165,46,100,.24)]"
+                          : allowed
+                            ? isToday
+                              ? "border border-[#A52E64]/35 bg-[#A52E64]/10 text-[#A52E64] hover:bg-[#A52E64]/15"
+                              : "bg-[#e8e3e5] text-[#241f22] hover:bg-[#A52E64]/10 hover:text-[#A52E64]"
+                            : "bg-[#d5cfd2] text-[#9a9095] opacity-45"
+                    }`}
+                  >
+                    {day}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onChange("")}
+                className="min-h-10 rounded-[13px] border border-[#b9b0b5] bg-[#ebe7e8] text-[12px] font-black text-[#756b70]"
+              >
+                Borrar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(formatDate(today));
+                  setViewDate(today);
+                  setOpen(false);
+                }}
+                className="min-h-10 rounded-[13px] border border-[#A52E64]/25 bg-[#A52E64]/10 text-[12px] font-black text-[#A52E64]"
+              >
+                Hoy
+              </button>
+            </div>
+
+            <p className="mt-3 text-center text-[10px] font-bold leading-relaxed text-[#81777b]">
+              Solo se permite seleccionar desde hoy hasta 13 meses adelante.
+            </p>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

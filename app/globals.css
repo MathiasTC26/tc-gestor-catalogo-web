@@ -1,5 +1,17 @@
 ﻿@import "tailwindcss";
+@import "tailwindcss";
 
+html {
+  font-family: var(--font-inter), Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-inter), Arial, sans-serif;
+}
+
+/* tus clases .tc-input, .tc-primary-button, .tc-sheen... */
 @layer components {
   .tc-input {
     min-height: 2.75rem;
