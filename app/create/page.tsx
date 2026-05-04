@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import {
   Building2,
@@ -94,6 +95,7 @@ export default function CreatePage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle",
   );
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
   const router = useRouter();
 
   const canCreate = useMemo(
@@ -163,9 +165,13 @@ export default function CreatePage() {
   }
 
   function handleSaveMagazine() {
-    if (!canCreate || saveStatus === "saving") return;
+    if (!canCreate || saveStatus === "saving" || isRouteLoading) return;
+
     if (saveStatus === "saved") {
-      router.push("/products");
+      setIsRouteLoading(true);
+      window.setTimeout(() => {
+        router.push("/products");
+      }, 850);
       return;
     }
 
@@ -397,6 +403,12 @@ export default function CreatePage() {
             </div>
           </section>
         </motion.section>
+
+        <RouteTransitionOverlay
+          show={isRouteLoading}
+          title="Cargando productos"
+          description="Preparando la sección de artículos..."
+        />
       </main>
     </MotionConfig>
   );

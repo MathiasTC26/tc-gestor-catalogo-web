@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 
 type ProductLabel = {
   id: string;
@@ -63,6 +64,8 @@ export default function PreviewPage() {
   const [products, setProducts] = useState<AddedProduct[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [isSavingPreview, setIsSavingPreview] = useState(false);
+  const [showCreatedToast, setShowCreatedToast] = useState(false);
 
   useEffect(() => {
     try {
@@ -84,14 +87,21 @@ export default function PreviewPage() {
         if (Array.isArray(parsedProducts)) {
           setProducts(
             parsedProducts
-              .filter((item) => item && Number(item.sheet) > 0 && Number(item.column) > 0)
+              .filter(
+                (item) =>
+                  item && Number(item.sheet) > 0 && Number(item.column) > 0,
+              )
               .sort((a, b) => {
-                if (Number(a.sheet) !== Number(b.sheet)) return Number(a.sheet) - Number(b.sheet);
+                if (Number(a.sheet) !== Number(b.sheet))
+                  return Number(a.sheet) - Number(b.sheet);
                 if (Number(a.column) !== Number(b.column)) {
                   return Number(a.column) - Number(b.column);
                 }
-                if (Number(a.row) !== Number(b.row)) return Number(a.row) - Number(b.row);
-                return String(a.name || a.code).localeCompare(String(b.name || b.code));
+                if (Number(a.row) !== Number(b.row))
+                  return Number(a.row) - Number(b.row);
+                return String(a.name || a.code).localeCompare(
+                  String(b.name || b.code),
+                );
               }),
           );
         }
@@ -128,7 +138,9 @@ export default function PreviewPage() {
   }, [activeIndex, sheets.length]);
 
   const activeSheet = sheets[activeIndex] ?? null;
-  const progress = Math.round((products.length / Math.max(revista.maxArticles, 1)) * 100);
+  const progress = Math.round(
+    (products.length / Math.max(revista.maxArticles, 1)) * 100,
+  );
 
   function getLabel(labelId: string) {
     return labels.find((label) => label.id === labelId);
@@ -142,16 +154,35 @@ export default function PreviewPage() {
     setActiveIndex((current) => Math.min(sheets.length - 1, current + 1));
   }
 
-  function savePreview() {
-    const snapshot = {
-      revista,
-      labels,
-      products,
-      savedAt: new Date().toISOString(),
-    };
 
-    sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
-    setSaved(true);
+  useEffect(() => {
+    if (!showCreatedToast) return;
+
+    const timeout = window.setTimeout(() => {
+      setShowCreatedToast(false);
+    }, 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [showCreatedToast]);
+
+  function savePreview() {
+    if (products.length === 0 || isSavingPreview) return;
+
+    setIsSavingPreview(true);
+
+    window.setTimeout(() => {
+      const snapshot = {
+        revista,
+        labels,
+        products,
+        savedAt: new Date().toISOString(),
+      };
+
+      sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
+      setSaved(true);
+      setIsSavingPreview(false);
+      setShowCreatedToast(true);
+    }, 950);
   }
 
   return (
@@ -211,7 +242,8 @@ export default function PreviewPage() {
 
                 <FinalActions
                   saved={saved}
-                  disabled={products.length === 0}
+                  disabled={products.length === 0 || isSavingPreview}
+                  saving={isSavingPreview}
                   onSave={savePreview}
                   onPrint={() => window.print()}
                 />
@@ -234,8 +266,47 @@ export default function PreviewPage() {
             )}
           </section>
         </motion.section>
+
+        <CreatedToast show={showCreatedToast} />
+
+        <RouteTransitionOverlay
+          show={isSavingPreview}
+          title="Guardando revista"
+          description="Registrando la composición final..."
+        />
       </main>
     </MotionConfig>
+  );
+}
+
+
+function CreatedToast({ show }: { show: boolean }) {
+  return (
+    <AnimatePresence>
+      {show ? (
+        <motion.div
+          initial={{ opacity: 0, y: 18, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.98 }}
+          transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed inset-x-3 bottom-5 z-[70] mx-auto flex max-w-[360px] items-center gap-3 rounded-[22px] border border-white/25 bg-[#232124] px-4 py-3 text-[#f4f1f3] shadow-[0_22px_60px_rgba(0,0,0,.45),inset_0_1px_0_rgba(255,255,255,.10)] sm:bottom-7"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[14px] bg-[#A52E64] text-white shadow-[0_12px_28px_rgba(165,46,100,.32)]">
+            <Check className="h-5 w-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[14px] font-black tracking-[-0.035em]">
+              Revista creada
+            </span>
+            <span className="mt-0.5 block text-[11px] font-bold text-[#f4f1f3]/58">
+              La revista se guardó correctamente.
+            </span>
+          </span>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
@@ -288,7 +359,13 @@ function PreviewRail({ onProductsClick }: { onProductsClick: () => void }) {
         number="02"
         onClick={onProductsClick}
       />
-      <RailItem active icon={<Eye />} title="Preview" subtitle="Actual" number="03" />
+      <RailItem
+        active
+        icon={<Eye />}
+        title="Preview"
+        subtitle="Actual"
+        number="03"
+      />
     </nav>
   );
 }
@@ -333,13 +410,19 @@ function RailItem({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[16px] font-black tracking-[-0.04em]">{title}</div>
-        <div className={`text-[10px] font-black ${active ? "text-white/50" : "text-[#7b7277]"}`}>
+        <div className="truncate text-[16px] font-black tracking-[-0.04em]">
+          {title}
+        </div>
+        <div
+          className={`text-[10px] font-black ${active ? "text-white/50" : "text-[#7b7277]"}`}
+        >
           {subtitle}
         </div>
       </div>
 
-      <span className={`text-[11px] font-black ${active ? "text-white/50" : "text-[#8a8085]"}`}>
+      <span
+        className={`text-[11px] font-black ${active ? "text-white/50" : "text-[#8a8085]"}`}
+      >
         {number}
       </span>
     </>
@@ -406,7 +489,9 @@ function SheetControlBar({
                 type="button"
                 onClick={() => onSelect(index)}
                 className={`h-2.5 rounded-full transition ${
-                  index === activeIndex ? "w-8 bg-[#A52E64]" : "w-2.5 bg-[#bdb5b9] hover:bg-[#A52E64]/45"
+                  index === activeIndex
+                    ? "w-8 bg-[#A52E64]"
+                    : "w-2.5 bg-[#bdb5b9] hover:bg-[#A52E64]/45"
                 }`}
                 aria-label={`Ir a hoja ${sheet.sheet}`}
               />
@@ -431,11 +516,13 @@ function SheetControlBar({
 function FinalActions({
   saved,
   disabled,
+  saving,
   onSave,
   onPrint,
 }: {
   saved: boolean;
   disabled: boolean;
+  saving: boolean;
   onSave: () => void;
   onPrint: () => void;
 }) {
@@ -447,7 +534,11 @@ function FinalActions({
         disabled={disabled}
         className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {saved ? "Revista guardada" : "Guardar revista"}
+        {saving
+          ? "Guardando revista"
+          : saved
+            ? "Revista guardada"
+            : "Guardar revista"}
         {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
       </button>
 
@@ -466,7 +557,15 @@ function FinalActions({
   );
 }
 
-function InfoChip({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function InfoChip({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
   return (
     <div className="rounded-[18px] border border-[#bdb5b9] bg-[#e5e0e2] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
       <span className="block text-[9px] font-black uppercase tracking-[0.18em] text-[#81777c]">
@@ -511,7 +610,8 @@ function MagazineSheet({
             {revista.title}
           </h2>
           <p className="mt-2 text-[12px] font-bold text-[#f4f1f3]/60">
-            {products.length} artículo{products.length === 1 ? "" : "s"} en esta hoja.
+            {products.length} artículo{products.length === 1 ? "" : "s"} en esta
+            hoja.
           </p>
         </div>
 
@@ -519,7 +619,9 @@ function MagazineSheet({
           <span className="text-[9px] font-black uppercase tracking-[0.12em] text-white/50">
             Hoja
           </span>
-          <span className="text-[24px] font-black leading-none">{sheetNumber}</span>
+          <span className="text-[24px] font-black leading-none">
+            {sheetNumber}
+          </span>
         </div>
       </header>
 
@@ -556,7 +658,9 @@ function ProductPreviewCard({
         className="flex min-h-10 items-center justify-between gap-3 px-4 py-2 text-white"
         style={{ backgroundColor: label?.color ?? "#A52E64" }}
       >
-        <span className="truncate text-[11px] font-black uppercase">{product.category}</span>
+        <span className="truncate text-[11px] font-black uppercase">
+          {product.category}
+        </span>
         <span className="text-[10px] font-black opacity-80">
           C{product.column} · F{product.row}
         </span>
@@ -565,10 +669,16 @@ function ProductPreviewCard({
       <div className="p-4">
         <div className="mb-4 grid h-28 place-items-center rounded-[16px] border border-[#c4bcc0] bg-[#f2eef0]">
           {product.image ? (
-            <img src={product.image} alt={product.name} className="max-h-full max-w-full object-contain" />
+            <img
+              src={product.image}
+              alt={product.name}
+              className="max-h-full max-w-full object-contain"
+            />
           ) : (
             <div className="grid h-16 w-16 place-items-center rounded-[18px] bg-[#A52E64]/10 text-[13px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
-              {product.factoryCode?.slice(0, 4) || product.code?.slice(0, 4) || "TC"}
+              {product.factoryCode?.slice(0, 4) ||
+                product.code?.slice(0, 4) ||
+                "TC"}
             </div>
           )}
         </div>
@@ -588,7 +698,10 @@ function ProductPreviewCard({
         <div className="mt-3 grid gap-1.5">
           {lines.length > 0 ? (
             lines.slice(0, 5).map((line) => (
-              <p key={line} className="text-[11.5px] font-semibold leading-relaxed text-[#655c61]">
+              <p
+                key={line}
+                className="text-[11.5px] font-semibold leading-relaxed text-[#655c61]"
+              >
                 • {line}
               </p>
             ))
@@ -615,7 +728,13 @@ function ProductPreviewCard({
   );
 }
 
-function EmptyState({ title, description }: { title: string; description: string }) {
+function EmptyState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   return (
     <div className="rounded-[18px] border border-dashed border-[#c4bcc0] bg-[#e9e4e6] px-4 py-8 text-center">
       <div className="mx-auto grid h-12 w-12 place-items-center rounded-[16px] bg-[#A52E64]/10 text-[#A52E64]">

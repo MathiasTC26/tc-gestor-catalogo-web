@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
+import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import {
   BookOpen,
   Check,
@@ -119,6 +120,7 @@ export default function ProductsPage() {
 
   const [addedProducts, setAddedProducts] = useState<AddedProduct[]>([]);
   const [previewProduct, setPreviewProduct] = useState<AddedProduct | null>(null);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
 
   useEffect(() => {
     sessionStorage.setItem("revista_labels", JSON.stringify(labels));
@@ -270,10 +272,16 @@ export default function ProductsPage() {
   }
 
   function goToPreview() {
+    if (addedProducts.length === 0 || isRouteLoading) return;
+
     sessionStorage.setItem("revista_labels", JSON.stringify(labels));
     sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
     sessionStorage.setItem("revista_preview_meta", JSON.stringify(revista));
-    router.push("/preview");
+    setIsRouteLoading(true);
+
+    window.setTimeout(() => {
+      router.push("/preview");
+    }, 850);
   }
 
   return (
@@ -507,11 +515,11 @@ export default function ProductsPage() {
 
                   <button
                     type="button"
-                    disabled={addedProducts.length === 0}
+                    disabled={addedProducts.length === 0 || isRouteLoading}
                     onClick={goToPreview}
                     className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Ver previa y guardar revista
+                    {isRouteLoading ? "Cargando preview" : "Ver previa y guardar revista"}
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
@@ -525,6 +533,12 @@ export default function ProductsPage() {
           label={previewProduct ? getLabel(previewProduct.labelId) : undefined}
           onClose={() => setPreviewProduct(null)}
           onConfirm={confirmAddProduct}
+        />
+
+        <RouteTransitionOverlay
+          show={isRouteLoading}
+          title="Cargando preview"
+          description="Preparando la revisión final de la revista..."
         />
       </main>
     </MotionConfig>

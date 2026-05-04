@@ -16,6 +16,7 @@ import {
   Search,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import { useMemo, useState, type ReactNode } from "react";
 
 type ClientType = "contacto" | "empresa";
@@ -168,6 +169,8 @@ export default function EditPage() {
 
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isSavingChanges, setIsSavingChanges] = useState(false);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
 
   const filteredRevistas = useMemo(() => {
     const clean = query.trim().toLowerCase();
@@ -281,43 +284,49 @@ export default function EditPage() {
   }
 
   function saveChanges() {
-    if (!selectedRevista || !workingClient || !canSave) return;
+    if (!selectedRevista || !workingClient || !canSave || isSavingChanges || isRouteLoading) return;
 
-    const updated: RevistaRecord = {
-      ...selectedRevista,
-      name: name.trim(),
-      edition: edition.trim(),
-      publicationDate,
-      price,
-      printRuns,
-      maxSheets,
-      maxArticles,
-      columns,
-      client: workingClient,
-    };
+    setIsSavingChanges(true);
 
-    setSelectedRevista(updated);
-    setOriginalClient(workingClient);
-    setChangeClient(false);
-    setClientQuery("");
-    setDirty(false);
-    setSaved(true);
+    window.setTimeout(() => {
+      const updated: RevistaRecord = {
+        ...selectedRevista,
+        name: name.trim(),
+        edition: edition.trim(),
+        publicationDate,
+        price,
+        printRuns,
+        maxSheets,
+        maxArticles,
+        columns,
+        client: workingClient,
+      };
 
-    sessionStorage.setItem(
-      "revista_preview_meta",
-      JSON.stringify({
-        number: updated.number,
-        title: updated.name,
-        client: updated.client.name,
-        maxSheets: updated.maxSheets,
-        maxColumns: updated.columns,
-        maxArticles: updated.maxArticles,
-      }),
-    );
+      setSelectedRevista(updated);
+      setOriginalClient(workingClient);
+      setChangeClient(false);
+      setClientQuery("");
+      setDirty(false);
+      setSaved(true);
+
+      sessionStorage.setItem(
+        "revista_preview_meta",
+        JSON.stringify({
+          number: updated.number,
+          title: updated.name,
+          client: updated.client.name,
+          maxSheets: updated.maxSheets,
+          maxColumns: updated.columns,
+          maxArticles: updated.maxArticles,
+        }),
+      );
+
+      setIsSavingChanges(false);
+    }, 900);
   }
 
   function continueToProducts() {
-    if (!selectedRevista || !workingClient) return;
+    if (!selectedRevista || !workingClient || !canContinue || isSavingChanges || isRouteLoading) return;
 
     sessionStorage.setItem(
       "revista_preview_meta",
@@ -331,7 +340,11 @@ export default function EditPage() {
       }),
     );
 
-    router.push("/products");
+    setIsRouteLoading(true);
+
+    window.setTimeout(() => {
+      router.push("/products");
+    }, 850);
   }
 
   return (
@@ -631,8 +644,10 @@ export default function EditPage() {
                     <EditActionsPanel
                       dirty={dirty}
                       saved={saved}
-                      canSave={canSave}
-                      canContinue={canContinue}
+                      canSave={canSave && !isSavingChanges && !isRouteLoading}
+                      canContinue={canContinue && !isSavingChanges && !isRouteLoading}
+                      isSaving={isSavingChanges}
+                      isRouteLoading={isRouteLoading}
                       onSave={saveChanges}
                       onContinue={continueToProducts}
                     />
@@ -643,6 +658,16 @@ export default function EditPage() {
           </section>
         </motion.section>
       </main>
+
+      <RouteTransitionOverlay
+        show={isSavingChanges || isRouteLoading}
+        title={isSavingChanges ? "Guardando cambios" : "Cargando productos"}
+        description={
+          isSavingChanges
+            ? "Actualizando los datos de la revista..."
+            : "Preparando la sección de artículos..."
+        }
+      />
     </MotionConfig>
   );
 }
@@ -1157,6 +1182,8 @@ function EditActionsPanel({
   saved,
   canSave,
   canContinue,
+  isSaving,
+  isRouteLoading,
   onSave,
   onContinue,
 }: {
@@ -1164,6 +1191,8 @@ function EditActionsPanel({
   saved: boolean;
   canSave: boolean;
   canContinue: boolean;
+  isSaving: boolean;
+  isRouteLoading: boolean;
   onSave: () => void;
   onContinue: () => void;
 }) {
@@ -1181,7 +1210,7 @@ function EditActionsPanel({
           disabled={!canSave}
           className="tc-primary-button flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {dirty ? "Guardar cambios" : saved ? "Guardado" : "Guardar cambios"}
+          {isSaving ? "Guardando" : dirty ? "Guardar cambios" : saved ? "Guardado" : "Guardar cambios"}
           <Save className="h-4 w-4" />
         </button>
 
@@ -1192,7 +1221,7 @@ function EditActionsPanel({
           className="min-h-12 rounded-[16px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/15 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <span className="inline-flex items-center justify-center gap-2">
-            Continuar a productos
+            {isRouteLoading ? "Cargando productos" : "Continuar a productos"}
             <ArrowRight className="h-4 w-4" />
           </span>
         </button>
