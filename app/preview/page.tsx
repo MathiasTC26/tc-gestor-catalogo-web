@@ -11,7 +11,7 @@ import {
   Printer,
   Save,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 
@@ -66,6 +66,7 @@ export default function PreviewPage() {
   const [saved, setSaved] = useState(false);
   const [isSavingPreview, setIsSavingPreview] = useState(false);
   const [showCreatedToast, setShowCreatedToast] = useState(false);
+  const saveLockRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -166,8 +167,9 @@ export default function PreviewPage() {
   }, [showCreatedToast]);
 
   function savePreview() {
-    if (products.length === 0 || isSavingPreview) return;
+    if (products.length === 0 || isSavingPreview || saved || saveLockRef.current) return;
 
+    saveLockRef.current = true;
     setIsSavingPreview(true);
 
     window.setTimeout(() => {
@@ -531,7 +533,7 @@ function FinalActions({
       <button
         type="button"
         onClick={onSave}
-        disabled={disabled}
+        disabled={disabled || saved}
         className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {saving

@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 
 type ClientType = "contacto" | "empresa";
 
@@ -171,6 +171,8 @@ export default function EditPage() {
   const [saved, setSaved] = useState(false);
   const [isSavingChanges, setIsSavingChanges] = useState(false);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const saveLockRef = useRef(false);
+  const routeLockRef = useRef(false);
 
   const filteredRevistas = useMemo(() => {
     const clean = query.trim().toLowerCase();
@@ -284,8 +286,18 @@ export default function EditPage() {
   }
 
   function saveChanges() {
-    if (!selectedRevista || !workingClient || !canSave || isSavingChanges || isRouteLoading) return;
+    if (
+      !selectedRevista ||
+      !workingClient ||
+      !canSave ||
+      !dirty ||
+      saved ||
+      isSavingChanges ||
+      isRouteLoading ||
+      saveLockRef.current
+    ) return;
 
+    saveLockRef.current = true;
     setIsSavingChanges(true);
 
     window.setTimeout(() => {
@@ -322,11 +334,14 @@ export default function EditPage() {
       );
 
       setIsSavingChanges(false);
+      saveLockRef.current = false;
     }, 900);
   }
 
   function continueToProducts() {
-    if (!selectedRevista || !workingClient || !canContinue || isSavingChanges || isRouteLoading) return;
+    if (!selectedRevista || !workingClient || !canContinue || isSavingChanges || isRouteLoading || routeLockRef.current) return;
+
+    routeLockRef.current = true;
 
     sessionStorage.setItem(
       "revista_preview_meta",
@@ -644,7 +659,7 @@ export default function EditPage() {
                     <EditActionsPanel
                       dirty={dirty}
                       saved={saved}
-                      canSave={canSave && !isSavingChanges && !isRouteLoading}
+                      canSave={canSave && dirty && !saved && !isSavingChanges && !isRouteLoading}
                       canContinue={canContinue && !isSavingChanges && !isRouteLoading}
                       isSaving={isSavingChanges}
                       isRouteLoading={isRouteLoading}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
@@ -96,6 +96,8 @@ export default function CreatePage() {
     "idle",
   );
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const saveLockRef = useRef(false);
+  const routeLockRef = useRef(false);
   const router = useRouter();
 
   const canCreate = useMemo(
@@ -164,10 +166,28 @@ export default function CreatePage() {
     if (prev) setActiveStep(prev);
   }
 
+  function persistMagazineMeta() {
+    sessionStorage.setItem(
+      "revista_preview_meta",
+      JSON.stringify({
+        number: 128,
+        title: nombre.trim() || "Revista sin nombre",
+        client: selectedClient?.name ?? clientQuery.trim() ?? "Cliente no definido",
+        maxSheets: hojas,
+        maxColumns: columnas,
+        maxArticles: articulos,
+      }),
+    );
+  }
+
   function handleSaveMagazine() {
     if (!canCreate || saveStatus === "saving" || isRouteLoading) return;
 
     if (saveStatus === "saved") {
+      if (routeLockRef.current) return;
+
+      persistMagazineMeta();
+      routeLockRef.current = true;
       setIsRouteLoading(true);
       window.setTimeout(() => {
         router.push("/products");
@@ -175,8 +195,12 @@ export default function CreatePage() {
       return;
     }
 
+    if (saveLockRef.current) return;
+
+    saveLockRef.current = true;
     setSaveStatus("saving");
     window.setTimeout(() => {
+      persistMagazineMeta();
       setSaveStatus("saved");
     }, 1200);
   }

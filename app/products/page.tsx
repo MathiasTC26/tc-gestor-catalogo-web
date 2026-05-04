@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 type ProductLabel = {
   id: string;
@@ -56,7 +56,7 @@ const labelColors = [
   "#546e7a",
 ];
 
-const revista = {
+const defaultRevista = {
   number: 128,
   title: "Catálogo Primavera 2025",
   client: "Todo Costura S.A.",
@@ -103,6 +103,7 @@ const mockProducts: ProductRecord[] = [
 
 export default function ProductsPage() {
   const router = useRouter();
+  const [revista, setRevista] = useState(defaultRevista);
 
   const [labels, setLabels] = useState<ProductLabel[]>([
     { id: "lbl-1", title: "Máquinas", color: "#A52E64" },
@@ -121,6 +122,26 @@ export default function ProductsPage() {
   const [addedProducts, setAddedProducts] = useState<AddedProduct[]>([]);
   const [previewProduct, setPreviewProduct] = useState<AddedProduct | null>(null);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const routeLockRef = useRef(false);
+
+  useEffect(() => {
+    const storedMeta = sessionStorage.getItem("revista_preview_meta");
+    if (!storedMeta) return;
+
+    try {
+      const parsed = JSON.parse(storedMeta) as Partial<typeof defaultRevista>;
+      setRevista({
+        number: Number(parsed.number) || defaultRevista.number,
+        title: parsed.title?.trim() || defaultRevista.title,
+        client: parsed.client?.trim() || defaultRevista.client,
+        maxSheets: clampLimit(parsed.maxSheets, 1, 50, defaultRevista.maxSheets),
+        maxColumns: clampLimit(parsed.maxColumns, 1, 4, defaultRevista.maxColumns),
+        maxArticles: clampLimit(parsed.maxArticles, 1, 150, defaultRevista.maxArticles),
+      });
+    } catch {
+      setRevista(defaultRevista);
+    }
+  }, []);
 
   useEffect(() => {
     sessionStorage.setItem("revista_labels", JSON.stringify(labels));
@@ -164,6 +185,17 @@ export default function ProductsPage() {
         }),
       }));
   }, [addedProducts]);
+
+  const canPreviewSelected = useMemo(() => buildPendingProduct() !== null, [
+    activeLabelId,
+    addedProducts,
+    column,
+    description,
+    revista,
+    row,
+    selectedProduct,
+    sheet,
+  ]);
 
   function createLabel() {
     const title = labelTitle.trim();
@@ -226,7 +258,8 @@ export default function ProductsPage() {
     if (!parsedSheet || !parsedColumn || !parsedRow) return null;
     if (parsedSheet < 1 || parsedSheet > revista.maxSheets) return null;
     if (parsedColumn < 1 || parsedColumn > revista.maxColumns) return null;
-    if (parsedRow < 1) return null;
+    if (parsedRow < 1 || parsedRow > revista.maxArticles) return null;
+    if (addedProducts.length >= revista.maxArticles) return null;
 
     const positionTaken = addedProducts.some((product) => {
       return (
@@ -272,8 +305,9 @@ export default function ProductsPage() {
   }
 
   function goToPreview() {
-    if (addedProducts.length === 0 || isRouteLoading) return;
+    if (addedProducts.length === 0 || isRouteLoading || routeLockRef.current) return;
 
+    routeLockRef.current = true;
     sessionStorage.setItem("revista_labels", JSON.stringify(labels));
     sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
     sessionStorage.setItem("revista_preview_meta", JSON.stringify(revista));
@@ -299,7 +333,7 @@ export default function ProductsPage() {
 
           <ProductRail />
 
-          <Intro addedProducts={addedProducts.length} />
+          <Intro addedProducts={addedProducts.length} revista={revista} />
 
           <section className="mt-4 grid gap-4">
             <div className="grid gap-4">
@@ -471,6 +505,10 @@ export default function ProductsPage() {
                       onLabelChange={setActiveLabelId}
                       onClear={clearSelection}
                       onPreview={openPreview}
+                      canPreview={canPreviewSelected}
+                      maxSheets={revista.maxSheets}
+                      maxColumns={revista.maxColumns}
+                      maxRows={revista.maxArticles}
                     />
                   ) : null}
                 </div>
@@ -642,7 +680,16 @@ function RailItem({
   );
 }
 
-function Intro({ addedProducts }: { addedProducts: number }) {
+function Intro({
+  addedProducts,
+  revista,
+}: {
+  addedProducts: number;
+  revista: {
+    number: number;
+    maxArticles: number;
+  };
+}) {
   return (
     <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -743,6 +790,10 @@ function SelectedProductCard({
   onLabelChange,
   onClear,
   onPreview,
+  canPreview,
+  maxSheets,
+  maxColumns,
+  maxRows,
 }: {
   product: ProductRecord;
   sheet: string;
@@ -758,6 +809,10 @@ function SelectedProductCard({
   onLabelChange: (value: string) => void;
   onClear: () => void;
   onPreview: () => void;
+  canPreview: boolean;
+  maxSheets: number;
+  maxColumns: number;
+  maxRows: number;
 }) {
   return (
     <motion.section
@@ -794,9 +849,11 @@ function SelectedProductCard({
         <SmallField label="Hoja">
           <input
             value={sheet}
-            onChange={(event) => onSheetChange(onlyNumber(event.target.value))}
+            onChange={(event) => onSheetChange(limitedNumber(event.target.value, maxSheets))}
             placeholder="Ej: 1"
             inputMode="numeric"
+            min={1}
+            max={maxSheets}
             className="tc-input text-center"
           />
         </SmallField>
@@ -804,9 +861,11 @@ function SelectedProductCard({
         <SmallField label="Columna">
           <input
             value={column}
-            onChange={(event) => onColumnChange(onlyNumber(event.target.value))}
+            onChange={(event) => onColumnChange(limitedNumber(event.target.value, maxColumns))}
             placeholder="Ej: 1"
             inputMode="numeric"
+            min={1}
+            max={maxColumns}
             className="tc-input text-center"
           />
         </SmallField>
@@ -814,13 +873,19 @@ function SelectedProductCard({
         <SmallField label="Fila">
           <input
             value={row}
-            onChange={(event) => onRowChange(onlyNumber(event.target.value))}
+            onChange={(event) => onRowChange(limitedNumber(event.target.value, maxRows))}
             placeholder="Ej: 1"
             inputMode="numeric"
+            min={1}
+            max={maxRows}
             className="tc-input text-center"
           />
         </SmallField>
       </div>
+
+      <p className="mt-2 text-[10.5px] font-bold leading-relaxed text-[#756b70]">
+        Límites activos: hoja 1-{maxSheets}, columna 1-{maxColumns}, fila 1-{maxRows}.
+      </p>
 
       <label className="mt-3 grid gap-1.5">
         <span className="text-[9px] font-black uppercase tracking-[0.13em] text-[#5f555a]">
@@ -835,7 +900,12 @@ function SelectedProductCard({
 
       <LabelPicker labels={labels} value={activeLabelId} onChange={onLabelChange} />
 
-      <button type="button" onClick={onPreview} className="tc-primary-button mt-4 w-full">
+      <button
+        type="button"
+        onClick={onPreview}
+        disabled={!canPreview}
+        className="tc-primary-button mt-4 w-full disabled:cursor-not-allowed disabled:opacity-45"
+      >
         Ver previa y agregar
       </button>
     </motion.section>
@@ -923,6 +993,19 @@ function LabelPicker({
 
 function onlyNumber(value: string) {
   return value.replace(/\D/g, "");
+}
+
+function limitedNumber(value: string, max: number) {
+  const clean = onlyNumber(value);
+  if (!clean) return "";
+
+  return String(Math.min(max, Math.max(1, Number(clean))));
+}
+
+function clampLimit(value: unknown, min: number, max: number, fallback: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(number)));
 }
 
 function SmallField({ label, children }: { label: string; children: ReactNode }) {
