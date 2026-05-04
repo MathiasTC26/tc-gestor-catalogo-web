@@ -10,27 +10,15 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Gestor de catálogo",
-  description: "Sistema web de gestión de catálogo",
+  title: "Gestor de revista",
+  description: "Sistema web de gestión de revista",
   icons: {
     icon: [
-      {
-        url: "/icon.png",
-        type: "image/png",
-      },
+      { url: "/favicon.ico" },
+      { url: "/icon.png", type: "image/png" },
     ],
-    shortcut: [
-      {
-        url: "/icon.png",
-        type: "image/png",
-      },
-    ],
-    apple: [
-      {
-        url: "/icon.png",
-        type: "image/png",
-      },
-    ],
+    shortcut: "/favicon.ico",
+    apple: "/icon.png",
   },
 };
 
