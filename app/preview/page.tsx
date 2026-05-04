@@ -2,17 +2,14 @@
 
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import {
-  ArrowLeft,
   BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
   Eye,
-  FileText,
   PackageSearch,
   Printer,
   Save,
-  Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -170,7 +167,7 @@ export default function PreviewPage() {
         >
           <AppHeader progress={progress} />
 
-          <PreviewRail />
+          <PreviewRail onProductsClick={() => router.push("/products")} />
 
           <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -193,141 +190,48 @@ export default function PreviewPage() {
             </div>
           </section>
 
-          <section className="mt-4 grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="grid gap-4 lg:sticky lg:top-6 lg:self-start">
-              <SummaryPanel
-                revista={revista}
-                productCount={products.length}
-                sheetCount={sheets.length}
-                progress={progress}
-              />
+          <section className="mt-4 grid gap-4">
+            {activeSheet ? (
+              <section className="min-w-0">
+                <SheetControlBar
+                  activeSheet={activeSheet.sheet}
+                  activeIndex={activeIndex}
+                  sheets={sheets}
+                  onPrev={goPrevSheet}
+                  onNext={goNextSheet}
+                  onSelect={setActiveIndex}
+                />
 
-              <FormCard
-                eyebrow="Control"
-                title="Navegación"
-                subtitle="Revisá hoja por hoja"
-                icon={<BookOpen />}
-              >
-                {sheets.length > 0 ? (
-                  <div className="grid gap-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={goPrevSheet}
-                        disabled={activeIndex === 0}
-                        className="grid h-11 w-11 place-items-center rounded-[15px] border border-[#b9b0b5] bg-[#ebe7e8] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        <ChevronLeft className="h-5 w-5" />
-                      </button>
-
-                      <div className="text-center">
-                        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#81777b]">
-                          Hoja activa
-                        </p>
-                        <p className="mt-1 text-[22px] font-black tracking-[-0.06em] text-[#241f22]">
-                          {activeSheet?.sheet ?? "—"}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={goNextSheet}
-                        disabled={activeIndex >= sheets.length - 1}
-                        className="grid h-11 w-11 place-items-center rounded-[15px] border border-[#b9b0b5] bg-[#ebe7e8] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        <ChevronRight className="h-5 w-5" />
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap justify-center gap-1.5">
-                      {sheets.map((sheet, index) => (
-                        <button
-                          key={sheet.sheet}
-                          type="button"
-                          onClick={() => setActiveIndex(index)}
-                          className={`h-2.5 rounded-full transition ${
-                            index === activeIndex
-                              ? "w-8 bg-[#A52E64]"
-                              : "w-2.5 bg-[#bdb5b9] hover:bg-[#A52E64]/45"
-                          }`}
-                          aria-label={`Ir a hoja ${sheet.sheet}`}
-                        />
-                      ))}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => router.push("/products")}
-                      className="min-h-11 rounded-[16px] border border-[#b9b0b5] bg-[#ebe7e8] px-4 text-[13px] font-black text-[#756b70] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#e4dfe1] active:scale-[0.985]"
-                    >
-                      Volver a productos
-                    </button>
-                  </div>
-                ) : (
-                  <EmptyState
-                    title="Sin productos"
-                    description="No hay artículos para previsualizar. Volvé a productos y agregá al menos uno."
-                  />
-                )}
-              </FormCard>
-
-              <FormCard
-                eyebrow="Acciones"
-                title="Finalizar"
-                subtitle="Guardar o imprimir"
-                icon={<Save />}
-              >
-                <div className="grid gap-2">
-                  <button
-                    type="button"
-                    onClick={savePreview}
-                    disabled={products.length === 0}
-                    className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {saved ? "Revista guardada" : "Guardar revista"}
-                    {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    disabled={products.length === 0}
-                    className="min-h-11 rounded-[16px] border border-[#b9b0b5] bg-[#ebe7e8] px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <span className="inline-flex items-center justify-center gap-2">
-                      Imprimir
-                      <Printer className="h-4 w-4" />
-                    </span>
-                  </button>
-                </div>
-              </FormCard>
-            </aside>
-
-            <section className="min-w-0">
-              {activeSheet ? (
                 <MagazineSheet
                   sheetNumber={activeSheet.sheet}
                   products={activeSheet.items}
                   getLabel={getLabel}
                   revista={revista}
                 />
-              ) : (
-                <div className="rounded-[26px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-6 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-                  <EmptyState
-                    title="Preview vacío"
-                    description="La vista previa aparecerá cuando agregues productos desde la pantalla anterior."
-                  />
 
-                  <button
-                    type="button"
-                    onClick={() => router.push("/products")}
-                    className="tc-primary-button mt-5 w-full"
-                  >
-                    Ir a productos
-                  </button>
-                </div>
-              )}
-            </section>
+                <FinalActions
+                  saved={saved}
+                  disabled={products.length === 0}
+                  onSave={savePreview}
+                  onPrint={() => window.print()}
+                />
+              </section>
+            ) : (
+              <div className="rounded-[26px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-6 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
+                <EmptyState
+                  title="Preview vacío"
+                  description="La vista previa aparecerá cuando agregues productos desde la pantalla anterior."
+                />
+
+                <button
+                  type="button"
+                  onClick={() => router.push("/products")}
+                  className="tc-primary-button mt-5 w-full"
+                >
+                  Ir a productos
+                </button>
+              </div>
+            )}
           </section>
         </motion.section>
       </main>
@@ -372,11 +276,18 @@ function AppHeader({ progress }: { progress: number }) {
   );
 }
 
-function PreviewRail() {
+function PreviewRail({ onProductsClick }: { onProductsClick: () => void }) {
   return (
-    <nav className="mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-3">
-      <RailItem done icon={<FileText />} title="Datos" subtitle="Completado" number="01" />
-      <RailItem done icon={<PackageSearch />} title="Productos" subtitle="Completado" number="02" />
+    <nav className="mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-2">
+      <RailItem
+        done
+        asButton
+        icon={<PackageSearch />}
+        title="Productos"
+        subtitle="Completado"
+        number="02"
+        onClick={onProductsClick}
+      />
       <RailItem active icon={<Eye />} title="Preview" subtitle="Actual" number="03" />
     </nav>
   );
@@ -385,32 +296,36 @@ function PreviewRail() {
 function RailItem({
   active,
   done,
+  asButton,
   icon,
   title,
   subtitle,
   number,
+  onClick,
 }: {
   active?: boolean;
   done?: boolean;
+  asButton?: boolean;
   icon: ReactNode;
   title: string;
   subtitle: string;
   number: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-[17px] px-3 py-3 transition ${
-        active
-          ? "bg-[#242225] text-[#f4f1f3] shadow-[0_14px_30px_rgba(0,0,0,.22)]"
-          : "text-[#332d31]"
-      }`}
-    >
+  const className = `group flex items-center gap-3 rounded-[17px] px-3 py-3 text-left transition ${
+    active
+      ? "bg-[#242225] text-[#f4f1f3] shadow-[0_14px_30px_rgba(0,0,0,.22)]"
+      : "text-[#332d31] hover:bg-[#ebe7e8] hover:shadow-[0_12px_26px_rgba(0,0,0,.10)] active:scale-[0.99]"
+  }`;
+
+  const content = (
+    <>
       <div
-        className={`grid h-10 w-10 shrink-0 place-items-center rounded-[13px] border ${
+        className={`grid h-10 w-10 shrink-0 place-items-center rounded-[13px] border transition ${
           active
             ? "border-[#A52E64]/35 bg-[#A52E64]"
             : done
-              ? "border-[#A52E64]/25 bg-[#A52E64]/10 text-[#A52E64]"
+              ? "border-[#A52E64]/25 bg-[#A52E64]/10 text-[#A52E64] group-hover:bg-[#A52E64]/15"
               : "border-[#bdb5b9] bg-[#e7e2e4] text-[#A52E64]"
         } [&_svg]:h-4 [&_svg]:w-4`}
       >
@@ -427,6 +342,126 @@ function RailItem({
       <span className={`text-[11px] font-black ${active ? "text-white/50" : "text-[#8a8085]"}`}>
         {number}
       </span>
+    </>
+  );
+
+  if (asButton) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
+}
+
+function SheetControlBar({
+  activeSheet,
+  activeIndex,
+  sheets,
+  onPrev,
+  onNext,
+  onSelect,
+}: {
+  activeSheet: number;
+  activeIndex: number;
+  sheets: { sheet: number; items: AddedProduct[] }[];
+  onPrev: () => void;
+  onNext: () => void;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <section className="mb-3 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
+            <BookOpen className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#81777b]">
+              Navegación de hoja
+            </p>
+            <h3 className="mt-1 text-[20px] font-black leading-none tracking-[-0.055em] text-[#241f22]">
+              Hoja {activeSheet}
+            </h3>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={activeIndex === 0}
+            className="grid h-11 w-11 place-items-center rounded-[15px] border border-[#b9b0b5] bg-[#ebe7e8] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="Hoja anterior"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+
+          <div className="flex min-w-0 flex-wrap justify-center gap-1.5 px-1">
+            {sheets.map((sheet, index) => (
+              <button
+                key={sheet.sheet}
+                type="button"
+                onClick={() => onSelect(index)}
+                className={`h-2.5 rounded-full transition ${
+                  index === activeIndex ? "w-8 bg-[#A52E64]" : "w-2.5 bg-[#bdb5b9] hover:bg-[#A52E64]/45"
+                }`}
+                aria-label={`Ir a hoja ${sheet.sheet}`}
+              />
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={activeIndex >= sheets.length - 1}
+            className="grid h-11 w-11 place-items-center rounded-[15px] border border-[#b9b0b5] bg-[#ebe7e8] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35"
+            aria-label="Hoja siguiente"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FinalActions({
+  saved,
+  disabled,
+  onSave,
+  onPrint,
+}: {
+  saved: boolean;
+  disabled: boolean;
+  onSave: () => void;
+  onPrint: () => void;
+}) {
+  return (
+    <div className="mt-3 grid gap-2 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:grid-cols-2 sm:p-4">
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={disabled}
+        className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saved ? "Revista guardada" : "Guardar revista"}
+        {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+      </button>
+
+      <button
+        type="button"
+        onClick={onPrint}
+        disabled={disabled}
+        className="min-h-11 rounded-[16px] border border-[#b9b0b5] bg-[#ebe7e8] px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/10 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <span className="inline-flex items-center justify-center gap-2">
+          Imprimir
+          <Printer className="h-4 w-4" />
+        </span>
+      </button>
     </div>
   );
 }
@@ -442,103 +477,6 @@ function InfoChip({ label, value, strong }: { label: string; value: string; stro
           strong ? "text-[#A52E64]" : "text-[#241f22]"
         }`}
       >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function FormCard({
-  eyebrow,
-  title,
-  subtitle,
-  icon,
-  children,
-}: {
-  eyebrow: string;
-  title: string;
-  subtitle: string;
-  icon: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-4 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)] [&_svg]:h-5 [&_svg]:w-5">
-          {icon}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <span className="rounded-full bg-[#A52E64] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-[#f7f2f4]">
-            {eyebrow}
-          </span>
-          <h3 className="mt-3 text-[24px] font-black leading-none tracking-[-0.06em] text-[#241f22]">
-            {title}
-          </h3>
-          <p className="mt-2 text-[12px] font-bold text-[#655c61]">{subtitle}</p>
-        </div>
-      </div>
-
-      {children}
-    </section>
-  );
-}
-
-function SummaryPanel({
-  revista,
-  productCount,
-  sheetCount,
-  progress,
-}: {
-  revista: RevistaMeta;
-  productCount: number;
-  sheetCount: number;
-  progress: number;
-}) {
-  return (
-    <section className="rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-4 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
-          <Sparkles className="h-5 w-5" />
-        </div>
-
-        <div>
-          <span className="rounded-full bg-[#A52E64] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-[#f7f2f4]">
-            Resumen
-          </span>
-          <h3 className="mt-3 text-[24px] font-black leading-none tracking-[-0.06em] text-[#241f22]">
-            Revista
-          </h3>
-        </div>
-      </div>
-
-      <div className="mb-4 overflow-hidden rounded-full bg-[#c8c1c5] shadow-[inset_0_1px_2px_rgba(0,0,0,.14)]">
-        <motion.div
-          initial={false}
-          animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.45, ease: "easeOut" }}
-          className="h-2 rounded-full bg-[linear-gradient(90deg,#621638,#A52E64,#c45b8b)]"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <SummaryRow label="Revista" value={`#${revista.number}`} />
-        <SummaryRow label="Nombre" value={revista.title} />
-        <SummaryRow label="Cliente" value={revista.client} />
-        <SummaryRow label="Hojas" value={String(sheetCount)} />
-        <SummaryRow label="Artículos" value={`${productCount}/${revista.maxArticles}`} />
-      </div>
-    </section>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-black/5 bg-[#ebe7e8]/70 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,.32)]">
-      <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#81777b]">
-        {label}
-      </span>
-      <span className="max-w-[180px] truncate text-right text-[12px] font-black text-[#241f22]">
         {value}
       </span>
     </div>

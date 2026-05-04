@@ -2,17 +2,14 @@
 
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import {
-  ArrowRight,
   BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
   Eye,
-  FileText,
   Layers3,
   PackageSearch,
   Search,
-  Sparkles,
   Tag,
   Trash2,
   X,
@@ -296,7 +293,7 @@ export default function ProductsPage() {
 
           <Intro addedProducts={addedProducts.length} />
 
-          <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="mt-4 grid gap-4">
             <div className="grid gap-4">
               <FormCard
                 eyebrow="Paso 2"
@@ -470,14 +467,6 @@ export default function ProductsPage() {
                   ) : null}
                 </div>
               </FormCard>
-            </div>
-
-            <aside className="grid gap-4 lg:sticky lg:top-6 lg:self-start">
-              <SummaryPanel
-                addedProducts={addedProducts}
-                progress={progress}
-                onPreview={goToPreview}
-              />
 
               <FormCard
                 eyebrow="Lista"
@@ -485,40 +474,50 @@ export default function ProductsPage() {
                 subtitle="Agrupados por hoja y posición"
                 icon={<Layers3 />}
               >
-                {addedProducts.length > 0 ? (
-                  <div className="grid gap-4">
-                    {groupedProducts.map((group) => (
-                      <section key={group.sheetNumber} className="grid gap-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <h3 className="text-[14px] font-black text-[#241f22]">
-                            Hoja {group.sheetNumber}
-                          </h3>
-                          <span className="text-[10px] font-black text-[#81777b]">
-                            {group.products.length} art.
-                          </span>
-                        </div>
+                <div className="grid gap-4">
+                  {addedProducts.length > 0 ? (
+                    <div className="grid gap-4">
+                      {groupedProducts.map((group) => (
+                        <section key={group.sheetNumber} className="grid gap-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-[14px] font-black text-[#241f22]">
+                              Hoja {group.sheetNumber}
+                            </h3>
+                            <span className="text-[10px] font-black text-[#81777b]">
+                              {group.products.length} art.
+                            </span>
+                          </div>
 
-                        <div className="grid gap-2">
-                          {group.products.map((product) => (
-                            <MiniProductCard
-                              key={product.id}
-                              product={product}
-                              label={getLabel(product.labelId)}
-                              onRemove={() => removeProduct(product.id)}
-                            />
-                          ))}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyProducts />
-                )}
+                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                            {group.products.map((product) => (
+                              <MiniProductCard
+                                key={product.id}
+                                product={product}
+                                label={getLabel(product.labelId)}
+                                onRemove={() => removeProduct(product.id)}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyProducts />
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={addedProducts.length === 0}
+                    onClick={goToPreview}
+                    className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Ver previa y guardar revista
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </FormCard>
-            </aside>
+            </div>
           </section>
-
-          <MobileFooter progress={progress} onPreview={goToPreview} />
         </motion.section>
 
         <PreviewModal
@@ -571,10 +570,9 @@ function AppHeader({ progress }: { progress: number }) {
 
 function ProductRail() {
   return (
-    <nav className="mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-3">
-      <RailItem done icon={<FileText />} title="Datos" subtitle="Completado" number="01" />
-      <RailItem active icon={<PackageSearch />} title="Productos" subtitle="Actual" number="02" />
-      <RailItem icon={<Eye />} title="Preview" subtitle="Final" number="03" />
+    <nav className="mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-2">
+      <RailItem active icon={<PackageSearch />} title="Productos" subtitle="Actual" number="01" />
+      <RailItem icon={<Eye />} title="Preview" subtitle="Final" number="02" />
     </nav>
   );
 }
@@ -924,74 +922,6 @@ function SmallField({ label, children }: { label: string; children: ReactNode })
   );
 }
 
-function SummaryPanel({
-  addedProducts,
-  progress,
-  onPreview,
-}: {
-  addedProducts: AddedProduct[];
-  progress: number;
-  onPreview: () => void;
-}) {
-  return (
-    <section className="rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-4 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
-          <Sparkles className="h-5 w-5" />
-        </div>
-
-        <div>
-          <span className="rounded-full bg-[#A52E64] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-[#f7f2f4]">
-            Resumen
-          </span>
-          <h3 className="mt-3 text-[24px] font-black leading-none tracking-[-0.06em] text-[#241f22]">
-            Composición
-          </h3>
-        </div>
-      </div>
-
-      <div className="mb-4 overflow-hidden rounded-full bg-[#c8c1c5] shadow-[inset_0_1px_2px_rgba(0,0,0,.14)]">
-        <motion.div
-          initial={false}
-          animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.45, ease: "easeOut" }}
-          className="h-2 rounded-full bg-[linear-gradient(90deg,#621638,#A52E64,#c45b8b)]"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <SummaryRow label="Revista" value={`#${revista.number}`} />
-        <SummaryRow label="Cliente" value={revista.client} />
-        <SummaryRow label="Hojas" value={String(revista.maxSheets)} />
-        <SummaryRow label="Agregados" value={`${addedProducts.length}/${revista.maxArticles}`} />
-      </div>
-
-      <button
-        type="button"
-        disabled={addedProducts.length === 0}
-        onClick={onPreview}
-        className="tc-primary-button mt-5 flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Ver previa y guardar revista
-        <ArrowRight className="h-4 w-4" />
-      </button>
-    </section>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-black/5 bg-[#ebe7e8]/70 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,.32)]">
-      <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#81777b]">
-        {label}
-      </span>
-      <span className="max-w-[180px] truncate text-right text-[12px] font-black text-[#241f22]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
 function MiniProductCard({
   product,
   label,
@@ -1154,33 +1084,5 @@ function PreviewModal({
         </motion.div>
       ) : null}
     </AnimatePresence>
-  );
-}
-
-function MobileFooter({
-  progress,
-  onPreview,
-}: {
-  progress: number;
-  onPreview: () => void;
-}) {
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[linear-gradient(to_top,rgba(16,16,17,.98)_70%,rgba(16,16,17,.78)_88%,transparent)] px-3 pb-[calc(12px+env(safe-area-inset-bottom))] pt-5 backdrop-blur-md lg:hidden">
-      <div className="mx-auto grid max-w-[440px] gap-2">
-        <div className="flex items-center justify-between px-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/46">
-          <span>Productos</span>
-          <span className="text-[#f4f1f3]">{progress}%</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={onPreview}
-          className="tc-primary-button flex w-full items-center justify-center gap-2"
-        >
-          Ver previa y guardar revista
-          <ArrowRight className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
   );
 }

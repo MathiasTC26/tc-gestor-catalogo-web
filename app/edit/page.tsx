@@ -11,12 +11,9 @@ import {
   ChevronRight,
   Contact,
   FilePenLine,
-  FileText,
   PackageSearch,
   Save,
   Search,
-  Sparkles,
-  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
@@ -354,7 +351,7 @@ export default function EditPage() {
 
           <Intro selectedRevista={selectedRevista} dirty={dirty} saved={saved} />
 
-          <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="mt-4 grid gap-4">
             <div className="grid gap-4">
               <FormCard
                 eyebrow="Paso 1"
@@ -416,6 +413,7 @@ export default function EditPage() {
                   ) : null}
                 </div>
               </FormCard>
+
 
               <AnimatePresence>
                 {selectedRevista ? (
@@ -629,47 +627,20 @@ export default function EditPage() {
                         </div>
                       </div>
                     </FormCard>
+
+                    <EditActionsPanel
+                      dirty={dirty}
+                      saved={saved}
+                      canSave={canSave}
+                      canContinue={canContinue}
+                      onSave={saveChanges}
+                      onContinue={continueToProducts}
+                    />
                   </motion.div>
                 ) : null}
               </AnimatePresence>
             </div>
-
-            <aside className="grid gap-4 lg:sticky lg:top-6 lg:self-start">
-              <SummaryPanel
-                selectedRevista={selectedRevista}
-                workingClient={workingClient}
-                dirty={dirty}
-                saved={saved}
-                canSave={canSave}
-                canContinue={canContinue}
-                onSave={saveChanges}
-                onContinue={continueToProducts}
-              />
-
-              <FormCard
-                eyebrow="Estado"
-                title="Flujo"
-                subtitle="Editar revista y continuar"
-                icon={<Sparkles />}
-              >
-                <div className="grid gap-2">
-                  <StatusRow label="Buscar revista" done={Boolean(selectedRevista)} />
-                  <StatusRow label="Validar datos" done={canSave || canContinue} />
-                  <StatusRow label="Guardar cambios" done={Boolean(selectedRevista && !dirty)} />
-                  <StatusRow label="Continuar productos" done={canContinue} />
-                </div>
-              </FormCard>
-            </aside>
           </section>
-
-          <MobileFooter
-            selected={Boolean(selectedRevista)}
-            dirty={dirty}
-            canSave={canSave}
-            canContinue={canContinue}
-            onSave={saveChanges}
-            onContinue={continueToProducts}
-          />
         </motion.section>
       </main>
     </MotionConfig>
@@ -1181,9 +1152,7 @@ function DatePicker({
   );
 }
 
-function SummaryPanel({
-  selectedRevista,
-  workingClient,
+function EditActionsPanel({
   dirty,
   saved,
   canSave,
@@ -1191,8 +1160,6 @@ function SummaryPanel({
   onSave,
   onContinue,
 }: {
-  selectedRevista: RevistaRecord | null;
-  workingClient: ClientRecord | null;
   dirty: boolean;
   saved: boolean;
   canSave: boolean;
@@ -1201,37 +1168,20 @@ function SummaryPanel({
   onContinue: () => void;
 }) {
   return (
-    <section className="rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-4 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
-          <Sparkles className="h-5 w-5" />
-        </div>
-
-        <div>
-          <span className="rounded-full bg-[#A52E64] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-[#f7f2f4]">
-            Resumen
-          </span>
-          <h3 className="mt-3 text-[24px] font-black leading-none tracking-[-0.06em] text-[#241f22]">
-            Edición
-          </h3>
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <SummaryRow label="Revista" value={selectedRevista ? `#${selectedRevista.number}` : "Sin seleccionar"} />
-        <SummaryRow label="Nombre" value={selectedRevista?.name ?? "Pendiente"} />
-        <SummaryRow label="Cliente" value={workingClient?.name ?? "Pendiente"} />
-        <SummaryRow label="Estado" value={!selectedRevista ? "Pendiente" : dirty ? "Sin guardar" : saved ? "Guardado" : "Listo"} />
-      </div>
-
-      <div className="mt-5 grid gap-2">
+    <motion.section
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.24, ease: "easeOut" }}
+      className="rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:p-4"
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
         <button
           type="button"
           onClick={onSave}
           disabled={!canSave}
-          className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
+          className="tc-primary-button flex min-h-12 w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Guardar cambios
+          {dirty ? "Guardar cambios" : saved ? "Guardado" : "Guardar cambios"}
           <Save className="h-4 w-4" />
         </button>
 
@@ -1239,7 +1189,7 @@ function SummaryPanel({
           type="button"
           onClick={onContinue}
           disabled={!canContinue}
-          className="min-h-11 rounded-[16px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/15 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-12 rounded-[16px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 text-[13px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#A52E64]/15 active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <span className="inline-flex items-center justify-center gap-2">
             Continuar a productos
@@ -1247,35 +1197,7 @@ function SummaryPanel({
           </span>
         </button>
       </div>
-    </section>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-black/5 bg-[#ebe7e8]/70 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,.32)]">
-      <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#81777b]">
-        {label}
-      </span>
-      <span className="max-w-[180px] truncate text-right text-[12px] font-black text-[#241f22]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function StatusRow({ label, done }: { label: string; done: boolean }) {
-  return (
-    <div className="flex items-center gap-3 rounded-[14px] border border-black/5 bg-[#ebe7e8]/70 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,.32)]">
-      <span
-        className={`grid h-6 w-6 place-items-center rounded-full ${
-          done ? "bg-[#A52E64] text-[#f7f2f4]" : "bg-[#d5cfd2] text-[#81777b]"
-        }`}
-      >
-        {done ? <Check className="h-3.5 w-3.5" /> : null}
-      </span>
-      <span className="text-[12px] font-black text-[#241f22]">{label}</span>
-    </div>
+    </motion.section>
   );
 }
 
@@ -1283,57 +1205,6 @@ function EmptyBox({ text }: { text: string }) {
   return (
     <div className="rounded-[17px] border border-dashed border-[#c4bcc0] bg-[#e9e4e6] px-3 py-5 text-center text-[12px] font-bold text-[#756b70]">
       {text}
-    </div>
-  );
-}
-
-function MobileFooter({
-  selected,
-  dirty,
-  canSave,
-  canContinue,
-  onSave,
-  onContinue,
-}: {
-  selected: boolean;
-  dirty: boolean;
-  canSave: boolean;
-  canContinue: boolean;
-  onSave: () => void;
-  onContinue: () => void;
-}) {
-  if (!selected) return null;
-
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[linear-gradient(to_top,rgba(16,16,17,.98)_70%,rgba(16,16,17,.78)_88%,transparent)] px-3 pb-[calc(12px+env(safe-area-inset-bottom))] pt-5 backdrop-blur-md lg:hidden">
-      <div className="mx-auto grid max-w-[440px] gap-2">
-        <div className="flex items-center justify-between px-1 text-[10px] font-black uppercase tracking-[0.14em] text-white/46">
-          <span>Editar</span>
-          <span className="text-[#f4f1f3]">{dirty ? "Sin guardar" : "Listo"}</span>
-        </div>
-
-        {dirty ? (
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!canSave}
-            className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Guardar cambios
-            <Save className="h-4 w-4" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onContinue}
-            disabled={!canContinue}
-            className="tc-primary-button flex w-full items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Continuar a productos
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        )}
-      </div>
     </div>
   );
 }
