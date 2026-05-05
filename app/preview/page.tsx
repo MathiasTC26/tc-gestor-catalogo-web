@@ -48,12 +48,12 @@ type RevistaMeta = {
 };
 
 const fallbackRevista: RevistaMeta = {
-  number: 128,
-  title: "Catálogo Primavera 2025",
-  client: "Todo Costura S.A.",
-  maxSheets: 18,
-  maxColumns: 4,
-  maxArticles: 48,
+  number: 0,
+  title: "Revista sin seleccionar",
+  client: "Cliente no asignado",
+  maxSheets: 1,
+  maxColumns: 1,
+  maxArticles: 1,
 };
 
 export default function PreviewPage() {

@@ -40,41 +40,9 @@ const limits = {
 };
 const stepOrder: CreateStep[] = ["datos", "cliente", "parametros"];
 
-const mockClients: Record<Exclude<ClientType, "">, ClientRecord[]> = {
-  contacto: [
-    {
-      id: "C-1842",
-      name: "María Fernández",
-      meta: "CI 3.456.789 · Cliente frecuente",
-      phone: "+595 981 000 121",
-      email: "maria@cliente.com",
-    },
-    {
-      id: "C-2149",
-      name: "Carlos Benítez",
-      meta: "CI 4.223.011 · Particular",
-      phone: "+595 982 110 404",
-      email: "carlos@cliente.com",
-    },
-  ],
-  empresa: [
-    {
-      id: "E-0921",
-      name: "Todo Costura S.A.",
-      meta: "RUC 80012345-6 · Cuenta corporativa",
-      ruc: "80012345-6",
-      phone: "+595 21 000 000",
-      email: "compras@todocostura.com",
-    },
-    {
-      id: "E-1390",
-      name: "Textiles del Sur",
-      meta: "RUC 80111888-2 · Mayorista",
-      ruc: "80111888-2",
-      phone: "+595 21 222 100",
-      email: "admin@textilessur.com",
-    },
-  ],
+const clientCatalog: Record<Exclude<ClientType, "">, ClientRecord[]> = {
+  contacto: [],
+  empresa: [],
 };
 
 export default function CreatePage() {
@@ -128,8 +96,8 @@ export default function CreatePage() {
   const filteredClients = useMemo(() => {
     if (!clientType) return [];
     const query = clientQuery.trim().toLowerCase();
-    if (!query) return mockClients[clientType].slice(0, 2);
-    return mockClients[clientType].filter((client) =>
+    if (!query) return [];
+    return clientCatalog[clientType].filter((client) =>
       `${client.name} ${client.meta} ${client.id}`
         .toLowerCase()
         .includes(query),
@@ -241,7 +209,7 @@ export default function CreatePage() {
                               )
                             }
                             maxLength={limits.nombreMax}
-                            placeholder="Ej: Catálogo Primavera 2025"
+                            placeholder="Nombre de la revista"
                             className="tc-input text-[15px] font-black tracking-[-0.02em]"
                           />
                         </Field>
@@ -252,7 +220,7 @@ export default function CreatePage() {
                               onChange={(event) =>
                                 setEdicion(event.target.value)
                               }
-                              placeholder="Nov 2024 – Ago 2025"
+                              placeholder="Edición"
                               className="tc-input"
                             />
                           </Field>
@@ -729,7 +697,7 @@ function ClientResults({
             ))
           ) : (
             <div className="rounded-[17px] border border-[#c4bcc0] bg-[#e9e4e6] px-3 py-3 text-[12px] font-bold text-[#756b70]">
-              Sin resultados de ejemplo. Luego se conecta al endpoint real.
+              Sin resultados. La búsqueda se conectará al endpoint real.
             </div>
           )}
         </motion.div>

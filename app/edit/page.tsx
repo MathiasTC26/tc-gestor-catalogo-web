@@ -58,94 +58,9 @@ const limits = {
   columnsMax: 4,
 };
 
-const mockClients: ClientRecord[] = [
-  {
-    id: "C-1842",
-    type: "contacto",
-    priceType: "Minorista",
-    name: "María Fernández",
-    code: "CLI-001842",
-    ci: "3.456.789",
-    ruc: "3456789-1",
-    phone: "+595 981 000 121",
-    email: "maria@cliente.com",
-    company: "Costuras del Centro",
-  },
-  {
-    id: "C-2149",
-    type: "contacto",
-    priceType: "Minorista",
-    name: "Carlos Benítez",
-    code: "CLI-002149",
-    ci: "4.223.011",
-    ruc: "4223011-2",
-    phone: "+595 982 110 404",
-    email: "carlos@cliente.com",
-    company: "Particular",
-  },
-  {
-    id: "E-0921",
-    type: "empresa",
-    priceType: "Mayorista",
-    name: "Todo Costura S.A.",
-    code: "EMP-000921",
-    ruc: "80012345-6",
-    phone: "+595 21 000 000",
-    email: "compras@todocostura.com",
-  },
-  {
-    id: "E-1390",
-    type: "empresa",
-    priceType: "Mayorista",
-    name: "Textiles del Sur",
-    code: "EMP-001390",
-    ruc: "80111888-2",
-    phone: "+595 21 222 100",
-    email: "admin@textilessur.com",
-  },
-];
+const clientCatalog: ClientRecord[] = [];
 
-const mockRevistas: RevistaRecord[] = [
-  {
-    id: "R-128",
-    number: 128,
-    name: "Catálogo Primavera 2025",
-    edition: "Nov 2024 – Ago 2025",
-    publicationDate: todayIso(),
-    price: "25.000",
-    printRuns: 1000,
-    maxSheets: 18,
-    maxArticles: 48,
-    columns: 4,
-    client: mockClients[2],
-  },
-  {
-    id: "R-127",
-    number: 127,
-    name: "Revista Especial Máquinas",
-    edition: "Abril – Julio",
-    publicationDate: addDaysIso(14),
-    price: "18.000",
-    printRuns: 700,
-    maxSheets: 12,
-    maxArticles: 32,
-    columns: 3,
-    client: mockClients[0],
-  },
-  {
-    id: "R-126",
-    number: 126,
-    name: "Catálogo Taller Profesional",
-    edition: "Enero – Marzo",
-    publicationDate: addDaysIso(35),
-    price: "",
-    printRuns: 500,
-    maxSheets: 10,
-    maxArticles: 24,
-    columns: 2,
-    client: mockClients[3],
-  },
-];
+const revistaCatalog: RevistaRecord[] = [];
 
 export default function EditPage() {
   const router = useRouter();
@@ -177,9 +92,9 @@ export default function EditPage() {
   const filteredRevistas = useMemo(() => {
     const clean = query.trim().toLowerCase();
 
-    if (!clean) return mockRevistas.slice(0, 3);
+    if (!clean) return [];
 
-    return mockRevistas.filter((revista) => {
+    return revistaCatalog.filter((revista) => {
       return `${revista.number} ${revista.name} ${revista.edition} ${revista.client.name} ${revista.client.code}`
         .toLowerCase()
         .includes(clean);
@@ -191,7 +106,7 @@ export default function EditPage() {
 
     const clean = clientQuery.trim().toLowerCase();
 
-    return mockClients
+    return clientCatalog
       .filter((client) => client.type === originalClient.type)
       .filter((client) => {
         if (!clean) return true;
@@ -398,7 +313,7 @@ export default function EditPage() {
                         setDirty(false);
                         setSaved(false);
                       }}
-                      placeholder="Ej: #128, Primavera, Todo Costura..."
+                      placeholder="Buscar por número, nombre, cliente o edición"
                       className="tc-input pl-9"
                     />
                   </div>
@@ -599,7 +514,7 @@ export default function EditPage() {
                                 setEdition(event.target.value.slice(0, limits.editionMax));
                                 markDirty();
                               }}
-                              placeholder="Ej: Abril - Julio"
+                              placeholder="Edición"
                               className="tc-input"
                             />
                           </Field>
