@@ -90,7 +90,7 @@ export default function CreatePage() {
   );
   const [tiradas, setTiradas] = useState(1);
   const [hojas, setHojas] = useState(1);
-  const [articulos, setArticulos] = useState(4);
+  const [articulos, setArticulos] = useState(1);
   const [columnas, setColumnas] = useState(1);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle",
