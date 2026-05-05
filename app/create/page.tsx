@@ -138,9 +138,9 @@ export default function CreatePage() {
     sessionStorage.setItem(
       "revista_preview_meta",
       JSON.stringify({
-        number: 128,
-        title: nombre.trim() || "Revista sin nombre",
-        client: selectedClient?.name ?? clientQuery.trim() ?? "Cliente no definido",
+        number: 0,
+        title: nombre.trim() || "Revista pendiente",
+        client: selectedClient?.name ?? clientQuery.trim() ?? "Cliente pendiente",
         maxSheets: hojas,
         maxColumns: columnas,
         maxArticles: articulos,
@@ -148,18 +148,29 @@ export default function CreatePage() {
     );
   }
 
+  function navigateToProducts() {
+    if (routeLockRef.current || isRouteLoading) return;
+
+    routeLockRef.current = true;
+    setIsRouteLoading(true);
+
+    window.setTimeout(() => {
+      router.push("/products");
+
+      window.setTimeout(() => {
+        if (window.location.pathname !== "/products") {
+          window.location.assign("/products");
+        }
+      }, 700);
+    }, 850);
+  }
+
   function handleSaveMagazine() {
     if (!canCreate || saveStatus === "saving" || isRouteLoading) return;
 
     if (saveStatus === "saved") {
-      if (routeLockRef.current) return;
-
       persistMagazineMeta();
-      routeLockRef.current = true;
-      setIsRouteLoading(true);
-      window.setTimeout(() => {
-        router.push("/products");
-      }, 850);
+      navigateToProducts();
       return;
     }
 
@@ -539,14 +550,6 @@ function HeroIntro() {
             Completá cada sección del flujo para preparar la revista antes de
             añadir productos.
           </p>
-        </div>
-        <div className="rounded-[18px] border border-[#bdb5b9] bg-[#e5e0e2] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
-          <span className="block text-[9px] font-black uppercase tracking-[0.18em] text-[#81777c]">
-            Edición
-          </span>
-          <span className="mt-1 block text-[22px] font-black leading-none tracking-[-0.05em] text-[#A52E64]">
-            #128
-          </span>
         </div>
       </div>
     </section>

@@ -65,8 +65,10 @@ export default function PreviewPage() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [saved, setSaved] = useState(false);
   const [isSavingPreview, setIsSavingPreview] = useState(false);
+  const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [showCreatedToast, setShowCreatedToast] = useState(false);
   const saveLockRef = useRef(false);
+  const routeLockRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -166,6 +168,23 @@ export default function PreviewPage() {
     return () => window.clearTimeout(timeout);
   }, [showCreatedToast]);
 
+  function goToProducts() {
+    if (isRouteLoading || routeLockRef.current) return;
+
+    routeLockRef.current = true;
+    setIsRouteLoading(true);
+
+    window.setTimeout(() => {
+      router.push("/products");
+
+      window.setTimeout(() => {
+        if (window.location.pathname !== "/products") {
+          window.location.assign("/products");
+        }
+      }, 700);
+    }, 850);
+  }
+
   function savePreview() {
     if (products.length === 0 || isSavingPreview || saved || saveLockRef.current) return;
 
@@ -200,7 +219,7 @@ export default function PreviewPage() {
         >
           <AppHeader progress={progress} />
 
-          <PreviewRail onProductsClick={() => router.push("/products")} />
+          <PreviewRail onProductsClick={goToProducts} />
 
           <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -259,7 +278,7 @@ export default function PreviewPage() {
 
                 <button
                   type="button"
-                  onClick={() => router.push("/products")}
+                  onClick={goToProducts}
                   className="tc-primary-button mt-5 w-full"
                 >
                   Ir a productos
@@ -272,9 +291,13 @@ export default function PreviewPage() {
         <CreatedToast show={showCreatedToast} />
 
         <RouteTransitionOverlay
-          show={isSavingPreview}
-          title="Guardando revista"
-          description="Registrando la composición final..."
+          show={isSavingPreview || isRouteLoading}
+          title={isRouteLoading ? "Cargando productos" : "Guardando revista"}
+          description={
+            isRouteLoading
+              ? "Preparando la sección de artículos..."
+              : "Registrando la composición final..."
+          }
         />
       </main>
     </MotionConfig>
