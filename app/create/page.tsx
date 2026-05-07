@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
@@ -18,6 +18,12 @@ import {
   Settings2,
   X,
 } from "lucide-react";
+import {
+  create_revista,
+  get_flow_from_url,
+  search_accounts,
+  search_contacts,
+} from "@/src/lib/api/flow";
 
 type ClientType = "contacto" | "empresa" | "";
 type CreateStep = "datos" | "cliente" | "parametros";
@@ -29,6 +35,9 @@ type ClientRecord = {
   phone?: string;
   email?: string;
   ruc?: string;
+  ci?: string;
+  tipoCliente?: string;
+  codCliente?: string;
 };
 
 const limits = {
@@ -38,12 +47,8 @@ const limits = {
   articulosMax: 150,
   columnasMax: 4,
 };
-const stepOrder: CreateStep[] = ["datos", "cliente", "parametros"];
 
-const clientCatalog: Record<Exclude<ClientType, "">, ClientRecord[]> = {
-  contacto: [],
-  empresa: [],
-};
+const stepOrder: CreateStep[] = ["datos", "cliente", "parametros"];
 
 export default function CreatePage() {
   const [activeStep, setActiveStep] = useState<CreateStep>("datos");
@@ -53,34 +58,44 @@ export default function CreatePage() {
   const [precio, setPrecio] = useState("");
   const [clientType, setClientType] = useState<ClientType>("");
   const [clientQuery, setClientQuery] = useState("");
+  const [clientResults, setClientResults] = useState<ClientRecord[]>([]);
+  const [clientSearchError, setClientSearchError] = useState("");
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(
     null,
   );
+
   const [tiradas, setTiradas] = useState(1);
   const [hojas, setHojas] = useState(1);
   const [articulos, setArticulos] = useState(1);
   const [columnas, setColumnas] = useState(1);
+
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">(
     "idle",
   );
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+
   const saveLockRef = useRef(false);
   const routeLockRef = useRef(false);
   const router = useRouter();
+
+  const flow = useMemo(() => get_flow_from_url(), []);
 
   const canCreate = useMemo(
     () =>
       nombre.trim().length > 0 &&
       fecha.trim().length > 0 &&
-      Boolean(clientType || selectedClient),
+      Boolean(clientType && selectedClient),
     [clientType, fecha, nombre, selectedClient],
   );
+
   const progress = useMemo(() => {
     let completed = 0;
+
     if (nombre.trim()) completed += 1;
     if (fecha.trim()) completed += 1;
-    if (clientType || selectedClient) completed += 1;
+    if (clientType && selectedClient) completed += 1;
     if (tiradas && hojas && articulos && columnas) completed += 1;
+
     return Math.round((completed / 4) * 100);
   }, [
     articulos,
@@ -93,19 +108,103 @@ export default function CreatePage() {
     tiradas,
   ]);
 
-  const filteredClients = useMemo(() => {
-    if (!clientType) return [];
-    const query = clientQuery.trim().toLowerCase();
-    if (!query) return [];
-    return clientCatalog[clientType].filter((client) =>
-      `${client.name} ${client.meta} ${client.id}`
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [clientQuery, clientType]);
+  useEffect(() => {
+    const query = clientQuery.trim();
+
+    if (!clientType || selectedClient || query.length < 1) {
+      setClientResults([]);
+      setClientSearchError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        setClientSearchError("");
+
+        if (clientType === "contacto") {
+          const response = await search_contacts<
+            Array<{
+              id: string;
+              nombre: string;
+              ci: string;
+              ruc: string;
+              telefono: string;
+              correo: string;
+              tipoCliente: string;
+              codCliente: string;
+              meta: string;
+            }>
+          >(query);
+
+          if (cancelled) return;
+
+          setClientResults(
+            response.data.map((item) => ({
+              id: item.id,
+              name: item.nombre,
+              meta: item.meta,
+              phone: item.telefono,
+              email: item.correo,
+              ruc: item.ruc,
+              ci: item.ci,
+              tipoCliente: item.tipoCliente,
+              codCliente: item.codCliente,
+            })),
+          );
+
+          return;
+        }
+
+        const response = await search_accounts<
+          Array<{
+            id: string;
+            nombre: string;
+            ruc: string;
+            telefono: string;
+            correo: string;
+            tipoCliente: string;
+            codCliente: string;
+            meta: string;
+          }>
+        >(query);
+
+        if (cancelled) return;
+
+        setClientResults(
+          response.data.map((item) => ({
+            id: item.id,
+            name: item.nombre,
+            meta: item.meta,
+            phone: item.telefono,
+            email: item.correo,
+            ruc: item.ruc,
+            tipoCliente: item.tipoCliente,
+            codCliente: item.codCliente,
+          })),
+        );
+      } catch (error) {
+        if (cancelled) return;
+
+        setClientResults([]);
+        setClientSearchError(
+          error instanceof Error
+            ? error.message
+            : "No se pudo buscar el cliente.",
+        );
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [clientQuery, clientType, selectedClient]);
 
   function normalizeMoney(value: string) {
     const clean = value.replace(/\D/g, "").slice(0, 9);
+
     return clean ? Number(clean).toLocaleString("es-PY") : "";
   }
 
@@ -122,25 +221,35 @@ export default function CreatePage() {
     setClientType(type);
     setSelectedClient(null);
     setClientQuery("");
+    setClientResults([]);
+    setClientSearchError("");
   }
 
   function goNext() {
     const next = stepOrder[stepOrder.indexOf(activeStep) + 1];
-    if (next) setActiveStep(next);
+
+    if (next) {
+      setActiveStep(next);
+    }
   }
 
   function goBack() {
     const prev = stepOrder[stepOrder.indexOf(activeStep) - 1];
-    if (prev) setActiveStep(prev);
+
+    if (prev) {
+      setActiveStep(prev);
+    }
   }
 
-  function persistMagazineMeta() {
+  function persistMagazineMeta(recordId?: string, nro?: number) {
     sessionStorage.setItem(
       "revista_preview_meta",
       JSON.stringify({
-        number: 0,
+        recordId: recordId ?? "",
+        number: nro ?? 0,
         title: nombre.trim() || "Revista pendiente",
-        client: selectedClient?.name ?? clientQuery.trim() ?? "Cliente pendiente",
+        client:
+          selectedClient?.name ?? clientQuery.trim() ?? "Cliente pendiente",
         maxSheets: hojas,
         maxColumns: columnas,
         maxArticles: articulos,
@@ -148,46 +257,104 @@ export default function CreatePage() {
     );
   }
 
-  function navigateToProducts() {
+  function navigateToProducts(productsFlow: string) {
     if (routeLockRef.current || isRouteLoading) return;
 
     routeLockRef.current = true;
     setIsRouteLoading(true);
 
+    const nextPath = `/products?flow=${encodeURIComponent(productsFlow)}`;
+
     window.setTimeout(() => {
-      router.push("/products");
+      router.push(nextPath);
 
       window.setTimeout(() => {
         if (window.location.pathname !== "/products") {
-          window.location.assign("/products");
+          window.location.assign(nextPath);
         }
       }, 700);
     }, 850);
   }
 
-  function handleSaveMagazine() {
+  async function handleSaveMagazine() {
     if (!canCreate || saveStatus === "saving" || isRouteLoading) return;
-
-    if (saveStatus === "saved") {
-      persistMagazineMeta();
-      navigateToProducts();
-      return;
-    }
-
+    if (!selectedClient) return;
     if (saveLockRef.current) return;
 
     saveLockRef.current = true;
     setSaveStatus("saving");
-    window.setTimeout(() => {
-      persistMagazineMeta();
+
+    try {
+      const payload = buildCreatePayload();
+      const result = await create_revista(payload, flow);
+
+      persistMagazineMeta(result.record_id, result.nro);
       setSaveStatus("saved");
-    }, 1200);
+
+      navigateToProducts(result.products_flow);
+    } catch (error) {
+      console.error("create revista error", error);
+
+      saveLockRef.current = false;
+      setSaveStatus("idle");
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "No se pudo crear la revista.",
+      );
+    }
+  }
+
+  function buildCreatePayload(): Record<string, unknown> {
+    const selected = selectedClient;
+
+    if (!selected) {
+      throw new Error("Seleccioná un cliente antes de crear la revista.");
+    }
+
+    const precioLimpio = precio.replace(/\D/g, "");
+
+    const base = {
+      flow,
+      nombre_revista: nombre.trim(),
+      edicion: edicion.trim(),
+      fecha,
+      precio_revista: precioLimpio,
+      tiradas: String(tiradas),
+      max_hojas: String(hojas),
+      max_articulos: String(articulos),
+      columnas: String(columnas),
+      tipo_cliente_precio: selected.tipoCliente ?? "",
+    };
+
+    if (clientType === "contacto") {
+      return {
+        ...base,
+        nombre_cliente: selected.name,
+        cedula: selected.ci ?? "",
+        ruc_contacts: selected.ruc ?? "",
+        telefono_contacts: selected.phone ?? "",
+        email_contacts: selected.email ?? "",
+        cod_cliente: selected.codCliente ?? "",
+      };
+    }
+
+    return {
+      ...base,
+      nombre_cuenta: selected.name,
+      ruc_accounts: selected.ruc ?? "",
+      telefono_accounts: selected.phone ?? "",
+      email_accounts: selected.email ?? "",
+      cod_cuenta: selected.codCliente ?? "",
+    };
   }
 
   return (
     <MotionConfig reducedMotion="user">
       <main className="min-h-screen overflow-x-hidden bg-[#101011] px-3 py-4 text-[#221d20] sm:px-5 lg:px-7">
         <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_-18%,rgba(255,255,255,.08),transparent_32%),linear-gradient(180deg,#151416_0%,#101011_72%)]" />
+
         <motion.section
           initial={{ opacity: 0, y: 18, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -224,6 +391,7 @@ export default function CreatePage() {
                             className="tc-input text-[15px] font-black tracking-[-0.02em]"
                           />
                         </Field>
+
                         <div className="grid gap-3 sm:grid-cols-2">
                           <Field label="Edición">
                             <input
@@ -235,10 +403,12 @@ export default function CreatePage() {
                               className="tc-input"
                             />
                           </Field>
+
                           <Field label="Fecha publicación">
                             <DatePicker value={fecha} onChange={setFecha} />
                           </Field>
                         </div>
+
                         <Field label="Precio revista / opcional">
                           <input
                             value={precio}
@@ -250,6 +420,7 @@ export default function CreatePage() {
                             className="tc-input"
                           />
                         </Field>
+
                         <StepControls
                           activeStep={activeStep}
                           onBack={goBack}
@@ -277,6 +448,7 @@ export default function CreatePage() {
                           >
                             Contacto
                           </ChoiceButton>
+
                           <ChoiceButton
                             active={clientType === "empresa"}
                             onClick={() => selectClientType("empresa")}
@@ -285,9 +457,11 @@ export default function CreatePage() {
                             Empresa
                           </ChoiceButton>
                         </div>
+
                         <Field label="Buscar cliente">
                           <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8a7f85]" />
+
                             <input
                               disabled={!clientType}
                               value={clientQuery}
@@ -297,28 +471,39 @@ export default function CreatePage() {
                               }}
                               placeholder={
                                 clientType === "contacto"
-                                  ? "Nombre o CI exacta..."
+                                  ? "Nombre, CI o código..."
                                   : clientType === "empresa"
-                                    ? "Nombre de empresa o RUC..."
+                                    ? "Empresa, RUC o código..."
                                     : "Seleccioná primero el tipo"
                               }
                               className="tc-input pl-9 disabled:cursor-not-allowed disabled:opacity-50"
                             />
                           </div>
                         </Field>
+
                         <ClientResults
                           clientType={clientType}
                           selectedClient={selectedClient}
-                          filteredClients={filteredClients}
+                          filteredClients={clientResults}
                           onSelect={(client) => {
                             setSelectedClient(client);
                             setClientQuery(client.name);
+                            setClientSearchError("");
                           }}
                           onClear={() => {
                             setSelectedClient(null);
                             setClientQuery("");
+                            setClientResults([]);
+                            setClientSearchError("");
                           }}
                         />
+
+                        {clientSearchError ? (
+                          <div className="rounded-[14px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
+                            {clientSearchError}
+                          </div>
+                        ) : null}
+
                         <StepControls
                           activeStep={activeStep}
                           onBack={goBack}
@@ -352,6 +537,7 @@ export default function CreatePage() {
                             )
                           }
                         />
+
                         <NumberControl
                           label="Máx. hojas"
                           value={hojas}
@@ -361,6 +547,7 @@ export default function CreatePage() {
                             updateNumber(setHojas, value, 1, limits.hojasMax)
                           }
                         />
+
                         <NumberControl
                           label="Máx. artículos"
                           value={articulos}
@@ -375,6 +562,7 @@ export default function CreatePage() {
                             )
                           }
                         />
+
                         <NumberControl
                           label="Columnas por hoja"
                           value={columnas}
@@ -428,18 +616,22 @@ function AppHeader({ progress }: { progress: number }) {
             className="max-h-full max-w-full object-contain"
           />
         </div>
+
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.32em] text-[#d9b9c9]">
             Centro operativo
           </p>
+
           <h2 className="mt-1 text-[38px] font-black leading-[0.9] tracking-[-0.075em] text-[#f4f1f3] sm:text-[56px] lg:text-[66px]">
             Crear revista
           </h2>
+
           <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#f4f1f3]/68 sm:text-[15px]">
             Gestiona la creación del catálogo desde una interfaz clara y
             controlada.
           </p>
         </div>
+
         <div className="rounded-[18px] border border-white/10 bg-white/[0.055] px-4 py-3">
           <span className="block text-[9px] font-black uppercase tracking-[0.18em] text-white/44">
             Avance
@@ -470,6 +662,7 @@ function ModuleRail({
         number="01"
         onClick={() => onStepChange("datos")}
       />
+
       <RailItem
         active={activeStep === "cliente"}
         icon={<Contact />}
@@ -478,6 +671,7 @@ function ModuleRail({
         number="02"
         onClick={() => onStepChange("cliente")}
       />
+
       <RailItem
         active={activeStep === "parametros"}
         icon={<Settings2 />}
@@ -509,25 +703,40 @@ function RailItem({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-3 rounded-[17px] px-3 py-3 text-left transition active:scale-[0.985] ${active ? "bg-[#242225] text-[#f4f1f3] shadow-[0_14px_30px_rgba(0,0,0,.22)]" : "text-[#332d31] hover:bg-[#e4dfe1]"}`}
+      className={`flex items-center gap-3 rounded-[17px] px-3 py-3 text-left transition active:scale-[0.985] ${
+        active
+          ? "bg-[#242225] text-[#f4f1f3] shadow-[0_14px_30px_rgba(0,0,0,.22)]"
+          : "text-[#332d31] hover:bg-[#e4dfe1]"
+      }`}
     >
       <div
-        className={`grid h-10 w-10 shrink-0 place-items-center rounded-[13px] border ${active ? "border-[#A52E64]/35 bg-[#A52E64]" : "border-[#bdb5b9] bg-[#e7e2e4] text-[#A52E64]"} [&_svg]:h-4 [&_svg]:w-4`}
+        className={`grid h-10 w-10 shrink-0 place-items-center rounded-[13px] border ${
+          active
+            ? "border-[#A52E64]/35 bg-[#A52E64]"
+            : "border-[#bdb5b9] bg-[#e7e2e4] text-[#A52E64]"
+        } [&_svg]:h-4 [&_svg]:w-4`}
       >
         {icon}
       </div>
+
       <div className="min-w-0 flex-1">
         <div className="truncate text-[16px] font-black tracking-[-0.04em]">
           {title}
         </div>
+
         <div
-          className={`text-[10px] font-black ${active ? "text-white/50" : "text-[#7b7277]"}`}
+          className={`text-[10px] font-black ${
+            active ? "text-white/50" : "text-[#7b7277]"
+          }`}
         >
           {subtitle}
         </div>
       </div>
+
       <span
-        className={`text-[11px] font-black ${active ? "text-white/50" : "text-[#8a8085]"}`}
+        className={`text-[11px] font-black ${
+          active ? "text-white/50" : "text-[#8a8085]"
+        }`}
       >
         {number}
       </span>
@@ -543,9 +752,11 @@ function HeroIntro() {
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
             Creación
           </p>
+
           <h1 className="mt-1 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
             Nueva revista
           </h1>
+
           <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
             Completá cada sección del flujo para preparar la revista antes de
             añadir productos.
@@ -590,25 +801,30 @@ function FormCard({
         <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)] [&_svg]:h-5 [&_svg]:w-5">
           {icon}
         </div>
+
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-[#A52E64] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-[#f7f2f4]">
               {eyebrow}
             </span>
+
             {badge ? (
               <span className="text-[10px] font-black text-[#8a8085]">
                 {badge}
               </span>
             ) : null}
           </div>
+
           <h3 className="text-[24px] font-black leading-none tracking-[-0.06em] text-[#241f22]">
             {title}
           </h3>
+
           <p className="mt-2 text-[12px] font-bold text-[#655c61]">
             {subtitle}
           </p>
         </div>
       </div>
+
       {children}
     </section>
   );
@@ -640,7 +856,11 @@ function ChoiceButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-11 items-center justify-center gap-2 rounded-[14px] border px-3 text-[12.5px] font-black transition active:scale-[0.985] ${active ? "border-[#A52E64] bg-[#A52E64]/10 text-[#A52E64] shadow-[0_0_0_4px_rgba(165,46,100,.10),inset_0_1px_0_rgba(255,255,255,.36)]" : "border-[#b9b0b5] bg-[linear-gradient(180deg,#eee9eb,#dfdadd)] text-[#62595d] shadow-[inset_0_1px_0_rgba(255,255,255,.46)] hover:border-[#A52E64]/40 hover:bg-[#e8e3e5]"}`}
+      className={`flex min-h-11 items-center justify-center gap-2 rounded-[14px] border px-3 text-[12.5px] font-black transition active:scale-[0.985] ${
+        active
+          ? "border-[#A52E64] bg-[#A52E64]/10 text-[#A52E64] shadow-[0_0_0_4px_rgba(165,46,100,.10),inset_0_1px_0_rgba(255,255,255,.36)]"
+          : "border-[#b9b0b5] bg-[linear-gradient(180deg,#eee9eb,#dfdadd)] text-[#62595d] shadow-[inset_0_1px_0_rgba(255,255,255,.46)] hover:border-[#A52E64]/40 hover:bg-[#e8e3e5]"
+      }`}
     >
       <span className="[&_svg]:h-4 [&_svg]:w-4">{icon}</span>
       {children}
@@ -678,33 +898,54 @@ function ClientResults({
                 type="button"
                 key={client.id}
                 onClick={() => onSelect(client)}
-                className="group flex min-h-[58px] items-center gap-3 rounded-[17px] border border-[#c4bcc0] bg-[#e9e4e6] px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,.45)] transition hover:-translate-y-0.5 hover:border-[#A52E64]/45 hover:bg-[#eee9eb] active:scale-[0.99]"
+                className="group rounded-[17px] border border-[#c4bcc0] bg-[#e9e4e6] p-3 text-left shadow-[inset_0_1px_0_rgba(255,255,255,.45)] transition hover:-translate-y-0.5 hover:border-[#A52E64]/45 hover:bg-[#eee9eb] active:scale-[0.99]"
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[11px] bg-[#A52E64]/10 text-[11px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
-                  {client.name
-                    .split(" ")
-                    .slice(0, 2)
-                    .map((word) => word[0])
-                    .join("")}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-black text-[#241f22]">
-                    {client.name}
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-[#A52E64]/10 text-[11px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
+                    {getClientInitials(client.name)}
                   </span>
-                  <span className="mt-0.5 block truncate text-[10.5px] font-semibold text-[#756b70]">
-                    {client.meta}
+
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-black text-[#241f22]">
+                      {client.name}
+                    </span>
+
+                    <span className="mt-1 block text-[11px] font-bold text-[#756b70]">
+                      {clientType === "empresa" ? "Empresa" : "Contacto"}
+                    </span>
                   </span>
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-[#A52E64] opacity-60 transition group-hover:translate-x-0.5" />
+
+                  <ChevronRight className="mt-2 h-4 w-4 shrink-0 text-[#A52E64] opacity-60 transition group-hover:translate-x-0.5" />
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <ClientInfoPill
+                    label="Código"
+                    value={client.codCliente || "—"}
+                  />
+                  <ClientInfoPill
+                    label={clientType === "empresa" ? "RUC" : "CI / RUC"}
+                    value={client.ci || client.ruc || "—"}
+                  />
+                  <ClientInfoPill
+                    label="Teléfono"
+                    value={client.phone || "—"}
+                  />
+                  <ClientInfoPill
+                    label="Email"
+                    value={client.email || "—"}
+                  />
+                </div>
               </button>
             ))
           ) : (
             <div className="rounded-[17px] border border-[#c4bcc0] bg-[#e9e4e6] px-3 py-3 text-[12px] font-bold text-[#756b70]">
-              Sin resultados. La búsqueda se conectará al endpoint real.
+              Escribí para buscar clientes en Zoho CRM.
             </div>
           )}
         </motion.div>
       ) : null}
+
       {selectedClient ? (
         <motion.div
           key="selected"
@@ -718,22 +959,36 @@ function ClientResults({
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-[linear-gradient(135deg,#761d46,#A52E64)] text-[#f7f2f4] shadow-[0_10px_22px_rgba(165,46,100,.24)]">
               <Check className="h-4 w-4" />
             </div>
+
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-black text-[#241f22]">
                 {selectedClient.name}
               </p>
-              <p className="mt-1 text-[11px] font-semibold leading-relaxed text-[#62595d]">
-                {selectedClient.meta}
+
+              <p className="mt-1 text-[11px] font-bold text-[#756b70]">
+                Cliente seleccionado
               </p>
-              <div className="mt-3 grid gap-1.5 text-[10.5px] font-bold text-[#756b70]">
-                {selectedClient.phone ? (
-                  <span>Tel: {selectedClient.phone}</span>
-                ) : null}
-                {selectedClient.email ? (
-                  <span>Email: {selectedClient.email}</span>
-                ) : null}
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <ClientInfoPill
+                  label="Código"
+                  value={selectedClient.codCliente || "—"}
+                />
+                <ClientInfoPill
+                  label={clientType === "empresa" ? "RUC" : "CI / RUC"}
+                  value={selectedClient.ci || selectedClient.ruc || "—"}
+                />
+                <ClientInfoPill
+                  label="Teléfono"
+                  value={selectedClient.phone || "—"}
+                />
+                <ClientInfoPill
+                  label="Email"
+                  value={selectedClient.email || "—"}
+                />
               </div>
             </div>
+
             <button
               type="button"
               onClick={onClear}
@@ -748,7 +1003,31 @@ function ClientResults({
     </AnimatePresence>
   );
 }
+function ClientInfoPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-[13px] border border-[#c4bcc0] bg-[#eee9eb] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
+      <p className="text-[8.5px] font-black uppercase tracking-[0.13em] text-[#A52E64]">
+        {label}
+      </p>
+      <p
+        className="mt-1 truncate text-[11px] font-bold text-[#655c61]"
+        title={value}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
 
+function getClientInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase();
+}
 function NumberControl({
   label,
   value,
@@ -768,10 +1047,12 @@ function NumberControl({
         <span className="text-[9px] font-black uppercase tracking-[0.13em] text-[#5f555a]">
           {label}
         </span>
+
         <span className="text-[8.5px] font-black text-[#8a8085]">
           máx. {max.toLocaleString("es-PY")}
         </span>
       </div>
+
       <div className="grid min-h-11 grid-cols-[42px_1fr_42px] overflow-hidden rounded-[14px] border border-[#b9b0b5] bg-[linear-gradient(180deg,#eee9eb,#e0dbdd)] shadow-[inset_0_1px_0_rgba(255,255,255,.58)] transition focus-within:border-[#A52E64] focus-within:ring-4 focus-within:ring-[#A52E64]/15">
         <button
           type="button"
@@ -781,6 +1062,7 @@ function NumberControl({
         >
           <Minus className="h-4 w-4" />
         </button>
+
         <input
           value={value}
           onChange={(event) =>
@@ -789,6 +1071,7 @@ function NumberControl({
           inputMode="numeric"
           className="min-w-0 border-x border-[#c4bcc0] bg-transparent text-center text-[14px] font-black text-[#201a1d] outline-none"
         />
+
         <button
           type="button"
           onClick={() => onChange(value + 1)}
@@ -812,6 +1095,7 @@ function StepControls({
   onNext: () => void;
 }) {
   const isFirst = activeStep === "datos";
+
   return (
     <div className="mt-4 grid gap-2 sm:grid-cols-2">
       <button
@@ -822,6 +1106,7 @@ function StepControls({
       >
         Volver
       </button>
+
       <button
         type="button"
         onClick={onNext}
@@ -871,9 +1156,14 @@ function SaveMagazineAction({
             type="button"
             onClick={onSave}
             disabled={!canCreate || isSaving}
-            className={`group relative min-h-12 overflow-hidden rounded-[17px] border px-4 text-[13px] font-black shadow-[inset_0_1px_0_rgba(255,255,255,.25)] transition active:scale-[0.985] disabled:cursor-not-allowed ${canCreate || isSaved ? "border-[#A52E64]/35 bg-[linear-gradient(135deg,#84204f,#A52E64)] text-[#f7f2f4] shadow-[0_16px_34px_rgba(165,46,100,.26)] hover:brightness-105" : "border-[#cdb7c1] bg-[#d9cbd1] text-[#9a7c8a] opacity-60"}`}
+            className={`group relative min-h-12 overflow-hidden rounded-[17px] border px-4 text-[13px] font-black shadow-[inset_0_1px_0_rgba(255,255,255,.25)] transition active:scale-[0.985] disabled:cursor-not-allowed ${
+              canCreate || isSaved
+                ? "border-[#A52E64]/35 bg-[linear-gradient(135deg,#84204f,#A52E64)] text-[#f7f2f4] shadow-[0_16px_34px_rgba(165,46,100,.26)] hover:brightness-105"
+                : "border-[#cdb7c1] bg-[#d9cbd1] text-[#9a7c8a] opacity-60"
+            }`}
           >
             <span className="pointer-events-none absolute inset-0 -translate-x-full bg-[linear-gradient(110deg,transparent,rgba(255,255,255,.24),transparent)] transition duration-700 group-hover:translate-x-full" />
+
             <span className="relative inline-flex items-center justify-center gap-2">
               {isSaved ? (
                 <ChevronRight className="h-4 w-4" />
@@ -905,12 +1195,15 @@ function SaveMagazineAction({
               <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-full border border-[#A52E64]/25 bg-[#A52E64]/10 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
                 <Loader2 className="h-7 w-7 animate-spin text-[#A52E64]" />
               </div>
+
               <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
                 Procesando
               </p>
+
               <h3 className="mt-2 text-[22px] font-black tracking-[-0.05em] text-[#241f22]">
                 Guardando revista
               </h3>
+
               <p className="mt-2 text-[13px] font-bold leading-relaxed text-[#766d72]">
                 Preparando la revista antes de añadir productos.
               </p>
@@ -931,14 +1224,19 @@ function DatePicker({
 }) {
   const baseToday = new Date();
   baseToday.setHours(0, 0, 0, 0);
+
   const maxDate = new Date(baseToday);
   maxDate.setMonth(maxDate.getMonth() + 13);
   maxDate.setHours(0, 0, 0, 0);
+
   const selected = value ? new Date(`${value}T00:00:00`) : null;
+
   const [open, setOpen] = useState(false);
   const [viewDate, setViewDate] = useState(selected ?? baseToday);
+
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
+
   const minViewMonth = new Date(
     baseToday.getFullYear(),
     baseToday.getMonth(),
@@ -946,37 +1244,55 @@ function DatePicker({
   );
   const maxViewMonth = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
   const currentViewMonth = new Date(year, month, 1);
+
   const canGoPrev = currentViewMonth > minViewMonth;
   const canGoNext = currentViewMonth < maxViewMonth;
+
   const monthName = viewDate.toLocaleDateString("es-PY", {
     month: "long",
     year: "numeric",
   });
+
   const firstDay = new Date(year, month, 1);
   const startOffset = firstDay.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
   const cells = Array.from({ length: 42 }, (_, index) => {
     const day = index - startOffset + 1;
+
     return day >= 1 && day <= daysInMonth ? day : null;
   });
+
   function formatDate(date: Date) {
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(date.getDate()).padStart(2, "0")}`;
   }
+
   function displayDate() {
     if (!value) return "dd/mm/aaaa";
+
     const [y, m, d] = value.split("-");
+
     return `${d}/${m}/${y}`;
   }
+
   function moveMonth(amount: number) {
     const next = new Date(year, month + amount, 1);
+
     if (next < minViewMonth || next > maxViewMonth) return;
+
     setViewDate(next);
   }
+
   function isDateAllowed(date: Date) {
     const clean = new Date(date);
     clean.setHours(0, 0, 0, 0);
+
     return clean >= baseToday && clean <= maxDate;
   }
+
   return (
     <div className="relative">
       <button
@@ -989,6 +1305,7 @@ function DatePicker({
           {displayDate()}
         </span>
       </button>
+
       <AnimatePresence>
         {open ? (
           <motion.div
@@ -1007,9 +1324,11 @@ function DatePicker({
               >
                 ←
               </button>
+
               <span className="text-[12px] font-black capitalize tracking-[-0.02em] text-[#241f22]">
                 {monthName}
               </span>
+
               <button
                 type="button"
                 onClick={() => moveMonth(1)}
@@ -1019,11 +1338,13 @@ function DatePicker({
                 →
               </button>
             </div>
+
             <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[9px] font-black uppercase text-[#81777b]">
               {["Do", "Lu", "Ma", "Mi", "Ju", "Vi", "Sa"].map((day) => (
                 <span key={day}>{day}</span>
               ))}
             </div>
+
             <div className="grid grid-cols-7 gap-1">
               {cells.map((day, index) => {
                 const cellDate = day ? new Date(year, month, day) : null;
@@ -1033,6 +1354,7 @@ function DatePicker({
                 const isToday = cellDate
                   ? formatDate(cellDate) === formatDate(baseToday)
                   : false;
+
                 return (
                   <button
                     key={`${day ?? "empty"}-${index}`}
@@ -1040,16 +1362,28 @@ function DatePicker({
                     disabled={!day || !allowed}
                     onClick={() => {
                       if (!cellDate || !allowed) return;
+
                       onChange(formatDate(cellDate));
                       setOpen(false);
                     }}
-                    className={`grid h-9 place-items-center rounded-[11px] text-[12px] font-black transition active:scale-95 disabled:cursor-not-allowed ${!day ? "opacity-0" : isSelected ? "bg-[#A52E64] text-[#f7f2f4] shadow-[0_10px_20px_rgba(165,46,100,.24)]" : allowed ? (isToday ? "border border-[#A52E64]/35 bg-[#A52E64]/10 text-[#A52E64] hover:bg-[#A52E64]/15" : "bg-[#e8e3e5] text-[#241f22] hover:bg-[#A52E64]/10 hover:text-[#A52E64]") : "bg-[#d5cfd2] text-[#9a9095] opacity-45"}`}
+                    className={`grid h-9 place-items-center rounded-[11px] text-[12px] font-black transition active:scale-95 disabled:cursor-not-allowed ${
+                      !day
+                        ? "opacity-0"
+                        : isSelected
+                          ? "bg-[#A52E64] text-[#f7f2f4] shadow-[0_10px_20px_rgba(165,46,100,.24)]"
+                          : allowed
+                            ? isToday
+                              ? "border border-[#A52E64]/35 bg-[#A52E64]/10 text-[#A52E64] hover:bg-[#A52E64]/15"
+                              : "bg-[#e8e3e5] text-[#241f22] hover:bg-[#A52E64]/10 hover:text-[#A52E64]"
+                            : "bg-[#d5cfd2] text-[#9a9095] opacity-45"
+                    }`}
                   >
                     {day}
                   </button>
                 );
               })}
             </div>
+
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -1058,6 +1392,7 @@ function DatePicker({
               >
                 Borrar
               </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -1070,6 +1405,7 @@ function DatePicker({
                 Hoy
               </button>
             </div>
+
             <p className="mt-3 text-center text-[10px] font-bold leading-relaxed text-[#81777b]">
               Solo se permite seleccionar desde hoy hasta 13 meses adelante.
             </p>

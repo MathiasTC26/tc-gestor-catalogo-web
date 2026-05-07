@@ -3,7 +3,13 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-type LaunchTarget = "dashboard" | "create" | "edit" | "preview";
+type LaunchTarget =
+  | "base"
+  | "dashboard"
+  | "create"
+  | "edit"
+  | "preview"
+  | "products";
 
 const launchCopy: Record<
   LaunchTarget,
@@ -16,6 +22,14 @@ const launchCopy: Record<
     destination: string;
   }
 > = {
+  base: {
+    eyebrow: "Gestor de Revista",
+    title: "Abriendo base",
+    description: "Validando acceso desde Creator.",
+    statusTitle: "Preparando sitio",
+    statusText: "Conectando con la base del gestor.",
+    destination: "Base",
+  },
   dashboard: {
     eyebrow: "Sistema",
     title: "Abriendo panel",
@@ -25,7 +39,7 @@ const launchCopy: Record<
     destination: "Dashboard",
   },
   create: {
-    eyebrow: "Crear catálogo",
+    eyebrow: "Crear revista",
     title: "Preparando creación",
     description: "Inicializando un entorno limpio de trabajo.",
     statusTitle: "Configurando formulario",
@@ -33,7 +47,7 @@ const launchCopy: Record<
     destination: "Crear",
   },
   edit: {
-    eyebrow: "Editar catálogo",
+    eyebrow: "Editar revista",
     title: "Cargando edición",
     description: "Recuperando el contexto autorizado desde Creator.",
     statusTitle: "Validando contenido",
@@ -48,14 +62,35 @@ const launchCopy: Record<
     statusText: "Organizando información para revisión.",
     destination: "Preview",
   },
+  products: {
+    eyebrow: "Productos",
+    title: "Abriendo selector",
+    description: "Preparando productos asociados a la revista.",
+    statusTitle: "Cargando productos",
+    statusText: "Conectando con el selector de productos.",
+    destination: "Productos",
+  },
 };
 
 function normalizeTarget(value: string | null): LaunchTarget {
-  if (value === "create" || value === "edit" || value === "preview" || value === "dashboard") {
+  if (
+    value === "base" ||
+    value === "dashboard" ||
+    value === "create" ||
+    value === "edit" ||
+    value === "preview" ||
+    value === "products"
+  ) {
     return value;
   }
 
-  return "dashboard";
+  if (value === "inicio") return "base";
+  if (value === "crear") return "create";
+  if (value === "editar") return "edit";
+  if (value === "visualizar") return "preview";
+  if (value === "productos") return "products";
+
+  return "base";
 }
 
 function getSafeNext(value: string | null): string | null {
@@ -74,11 +109,21 @@ function getSafeNext(value: string | null): string | null {
   }
 }
 
+function getFallbackNext(target: LaunchTarget): string {
+  if (target === "base" || target === "dashboard") return "/";
+  if (target === "create") return "/create";
+  if (target === "edit") return "/edit";
+  if (target === "products") return "/products";
+  if (target === "preview") return "/preview";
+
+  return "/";
+}
+
 function LaunchContent() {
   const params = useSearchParams();
 
   const target = normalizeTarget(params.get("target"));
-  const nextUrl = getSafeNext(params.get("next"));
+  const nextUrl = getSafeNext(params.get("next")) ?? getFallbackNext(target);
 
   const copy = launchCopy[target];
 
@@ -103,7 +148,7 @@ function LaunchContent() {
       } else if (nextProgress < 82) {
         setLabel(copy.statusText);
       } else {
-        setLabel(nextUrl ? "Abriendo destino..." : "Entorno preparado.");
+        setLabel("Abriendo destino...");
       }
 
       if (ratio < 1) {
@@ -111,11 +156,9 @@ function LaunchContent() {
         return;
       }
 
-      if (nextUrl) {
-        window.setTimeout(() => {
-          window.location.href = nextUrl;
-        }, 220);
-      }
+      window.setTimeout(() => {
+        window.location.href = nextUrl;
+      }, 220);
     }
 
     frame = window.requestAnimationFrame(update);
@@ -129,7 +172,7 @@ function LaunchContent() {
     () => ({
       width: `${progress}%`,
     }),
-    [progress]
+    [progress],
   );
 
   return (
@@ -141,7 +184,7 @@ function LaunchContent() {
           <div className="grid grid-cols-[52px_1fr] items-center gap-3">
             <div className="tc-sheen grid h-[52px] w-[52px] place-items-center rounded-[17px] border border-white/10 bg-[linear-gradient(145deg,#2d282b,#1f1c1f)] shadow-[0_18px_34px_-24px_rgba(0,0,0,0.72)]">
               <span className="text-[15px] font-black tracking-[-0.08em] text-[#f3f0f1]">
-                TC
+                RV
               </span>
             </div>
 

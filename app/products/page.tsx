@@ -17,6 +17,11 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  build_api_url,
+  get_flow_from_url,
+  search_products,
+} from "@/src/lib/api/flow";
 
 type ProductLabel = {
   id: string;
@@ -32,7 +37,10 @@ type ProductRecord = {
   brand: string;
   category: string;
   price: string;
+  priceNumber: number;
+  priceBookName: string;
   description: string;
+  coverUrl: string;
 };
 
 type AddedProduct = ProductRecord & {
@@ -41,6 +49,31 @@ type AddedProduct = ProductRecord & {
   row: number;
   labelId: string;
   customDescription: string;
+};
+
+type RevistaMeta = {
+  number: number;
+  title: string;
+  client: string;
+  maxSheets: number;
+  maxColumns: number;
+  maxArticles: number;
+  tipoClientePrecio?: string;
+  recordId?: string;
+};
+
+type ApiProductRecord = {
+  id?: string;
+  codigo?: string;
+  nombre?: string;
+  tipoMaquina?: string;
+  portadaUrl?: string;
+  codigoFabrica?: string;
+  descripcion?: string;
+  marca?: string;
+  precioNumero?: number;
+  precioFormateado?: string;
+  priceBookName?: string;
 };
 
 const labelColors = [
@@ -56,7 +89,7 @@ const labelColors = [
   "#546e7a",
 ];
 
-const emptyRevista = {
+const emptyRevista: RevistaMeta = {
   number: 0,
   title: "Revista sin seleccionar",
   client: "Cliente no asignado",
@@ -65,19 +98,19 @@ const emptyRevista = {
   maxArticles: 1,
 };
 
-const productCatalog: ProductRecord[] = [];
-
 export default function ProductsPage() {
   const router = useRouter();
-  const [revista, setRevista] = useState(emptyRevista);
 
-  const [labels, setLabels] = useState<ProductLabel[]>([
-]);
+  const [flow, setFlow] = useState("");
+  const [revista, setRevista] = useState<RevistaMeta>(emptyRevista);
+
+  const [labels, setLabels] = useState<ProductLabel[]>([]);
   const [labelTitle, setLabelTitle] = useState("");
   const [selectedColor, setSelectedColor] = useState(labelColors[0]);
   const [activeLabelId, setActiveLabelId] = useState("");
 
   const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ProductRecord[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<ProductRecord | null>(null);
   const [sheet, setSheet] = useState("");
   const [column, setColumn] = useState("");
@@ -86,51 +119,158 @@ export default function ProductsPage() {
 
   const [addedProducts, setAddedProducts] = useState<AddedProduct[]>([]);
   const [previewProduct, setPreviewProduct] = useState<AddedProduct | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+
   const routeLockRef = useRef(false);
+  const hasHydratedStorageRef = useRef(false);
 
   useEffect(() => {
+    const currentFlow =
+      get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
+
+    setFlow(currentFlow);
+
+    if (currentFlow) {
+      sessionStorage.setItem("revista_flow", currentFlow);
+    }
+
+    cleanSensitiveUrlParams();
+
     const storedMeta = sessionStorage.getItem("revista_preview_meta");
-    if (!storedMeta) return;
+    const storedLabels = sessionStorage.getItem("revista_labels");
+    const storedProducts = sessionStorage.getItem("revista_productos");
+
+    if (storedMeta) {
+      try {
+        const parsed = JSON.parse(storedMeta) as Partial<RevistaMeta>;
+
+        setRevista({
+          number: Number(parsed.number) || emptyRevista.number,
+          title: parsed.title?.trim() || emptyRevista.title,
+          client: parsed.client?.trim() || emptyRevista.client,
+          maxSheets: clampLimit(parsed.maxSheets, 1, 50, emptyRevista.maxSheets),
+          maxColumns: clampLimit(parsed.maxColumns, 1, 4, emptyRevista.maxColumns),
+          maxArticles: clampLimit(parsed.maxArticles, 1, 150, emptyRevista.maxArticles),
+          tipoClientePrecio: parsed.tipoClientePrecio?.trim() || "",
+          recordId: parsed.recordId?.trim() || "",
+        });
+      } catch {
+        setRevista(emptyRevista);
+      }
+    }
 
     try {
-      const parsed = JSON.parse(storedMeta) as Partial<typeof emptyRevista>;
-      setRevista({
-        number: Number(parsed.number) || emptyRevista.number,
-        title: parsed.title?.trim() || emptyRevista.title,
-        client: parsed.client?.trim() || emptyRevista.client,
-        maxSheets: clampLimit(parsed.maxSheets, 1, 50, emptyRevista.maxSheets),
-        maxColumns: clampLimit(parsed.maxColumns, 1, 4, emptyRevista.maxColumns),
-        maxArticles: clampLimit(parsed.maxArticles, 1, 150, emptyRevista.maxArticles),
-      });
+      const parsedLabels = storedLabels ? JSON.parse(storedLabels) : [];
+
+      if (Array.isArray(parsedLabels)) {
+        const normalizedLabels = parsedLabels.filter(isValidProductLabel) as ProductLabel[];
+        setLabels(normalizedLabels);
+
+        if (normalizedLabels[0]) {
+          setActiveLabelId(normalizedLabels[0].id);
+        }
+      }
     } catch {
-      setRevista(emptyRevista);
+      setLabels([]);
+      setActiveLabelId("");
     }
+
+    try {
+      const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
+
+      if (Array.isArray(parsedProducts)) {
+        setAddedProducts(
+          parsedProducts.filter(isValidAddedProduct) as AddedProduct[],
+        );
+      }
+    } catch {
+      setAddedProducts([]);
+    }
+
+    hasHydratedStorageRef.current = true;
   }, []);
 
   useEffect(() => {
+    if (!hasHydratedStorageRef.current) return;
+
     sessionStorage.setItem("revista_labels", JSON.stringify(labels));
   }, [labels]);
 
   useEffect(() => {
+    if (!hasHydratedStorageRef.current) return;
+
     sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
   }, [addedProducts]);
 
-  const filteredProducts = useMemo(() => {
-    const clean = query.trim().toLowerCase();
+  useEffect(() => {
+    const cleanQuery = query.trim();
 
-    return productCatalog.filter((product) => {
-      const alreadyAdded = addedProducts.some((item) => item.id === product.id);
-      if (alreadyAdded) return false;
-      if (!clean) return true;
+    if (selectedProduct) return;
 
-      return `${product.name} ${product.code} ${product.factoryCode} ${product.category}`
-        .toLowerCase()
-        .includes(clean);
-    });
-  }, [addedProducts, query]);
+    if (cleanQuery.length < 1) {
+      setSearchResults([]);
+      setSearchError("");
+      setIsSearching(false);
+      return;
+    }
 
-  const progress = Math.round((addedProducts.length / revista.maxArticles) * 100);
+    let cancelled = false;
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setIsSearching(true);
+        setSearchError("");
+
+        const response = await search_products<ApiProductRecord[]>(
+          cleanQuery,
+          flow,
+          revista.tipoClientePrecio,
+        );
+
+        if (cancelled) return;
+
+        const normalized = response.data
+          .map(normalizeApiProduct)
+          .filter((product): product is ProductRecord => product !== null)
+          .filter((product) => {
+            return !addedProducts.some((item) => item.id === product.id);
+          });
+
+        setSearchResults(normalized);
+      } catch (error) {
+        if (cancelled) return;
+
+        setSearchResults([]);
+        setSearchError(
+          error instanceof Error
+            ? error.message
+            : "No se pudo buscar productos.",
+        );
+      } finally {
+        if (!cancelled) {
+          setIsSearching(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    addedProducts,
+    flow,
+    query,
+    revista.tipoClientePrecio,
+    selectedProduct,
+  ]);
+
+  const progress = Math.min(
+    100,
+    Math.round((addedProducts.length / revista.maxArticles) * 100),
+  );
 
   const groupedProducts = useMemo(() => {
     const groups = new Map<number, AddedProduct[]>();
@@ -176,6 +316,7 @@ export default function ProductsPage() {
 
     setLabels((current) => [...current, nextLabel]);
     setActiveLabelId(nextLabel.id);
+    applyLabelToGroup(sheet, column, nextLabel.id);
     setLabelTitle("");
   }
 
@@ -198,6 +339,7 @@ export default function ProductsPage() {
     setSheet("");
     setColumn("");
     setRow("1");
+    setSearchResults([]);
 
     if (!activeLabelId && labels[0]) {
       setActiveLabelId(labels[0].id);
@@ -211,6 +353,8 @@ export default function ProductsPage() {
     setSheet("");
     setColumn("");
     setRow("1");
+    setSearchResults([]);
+    setSearchError("");
   }
 
   function buildPendingProduct() {
@@ -236,12 +380,14 @@ export default function ProductsPage() {
 
     if (positionTaken) return null;
 
+    const groupLabelId = getGroupLabelId(parsedSheet, parsedColumn);
+
     return {
       ...selectedProduct,
       sheet: parsedSheet,
       column: parsedColumn,
       row: parsedRow,
-      labelId: activeLabelId,
+      labelId: groupLabelId || activeLabelId,
       customDescription: description.trim(),
     };
   }
@@ -265,30 +411,92 @@ export default function ProductsPage() {
     setAddedProducts((current) => current.filter((product) => product.id !== id));
   }
 
+  function getGroupLabelId(sheetValue: string | number, columnValue: string | number) {
+    const parsedSheet = Number(sheetValue);
+    const parsedColumn = Number(columnValue);
+
+    if (!parsedSheet || !parsedColumn) return "";
+
+    const groupProduct = addedProducts.find((product) => {
+      return product.sheet === parsedSheet && product.column === parsedColumn;
+    });
+
+    return groupProduct?.labelId ?? "";
+  }
+
+  function applyLabelToGroup(
+    sheetValue: string | number,
+    columnValue: string | number,
+    labelId: string,
+  ) {
+    const parsedSheet = Number(sheetValue);
+    const parsedColumn = Number(columnValue);
+
+    if (!parsedSheet || !parsedColumn || !labelId) return;
+
+    setAddedProducts((current) =>
+      current.map((product) =>
+        product.sheet === parsedSheet && product.column === parsedColumn
+          ? { ...product, labelId }
+          : product,
+      ),
+    );
+  }
+
+  function handleSheetChange(value: string) {
+    setSheet(value);
+
+    const groupLabelId = getGroupLabelId(value, column);
+    if (groupLabelId) {
+      setActiveLabelId(groupLabelId);
+    }
+  }
+
+  function handleColumnChange(value: string) {
+    setColumn(value);
+
+    const groupLabelId = getGroupLabelId(sheet, value);
+    if (groupLabelId) {
+      setActiveLabelId(groupLabelId);
+    }
+  }
+
+  function handleLabelChange(labelId: string) {
+    setActiveLabelId(labelId);
+    applyLabelToGroup(sheet, column, labelId);
+  }
+
   function getLabel(labelId: string) {
     return labels.find((label) => label.id === labelId);
   }
 
   function goToPreview() {
-    if (addedProducts.length === 0 || isRouteLoading || routeLockRef.current) return;
+  if (addedProducts.length === 0 || isRouteLoading || routeLockRef.current) return;
 
-    routeLockRef.current = true;
-    sessionStorage.setItem("revista_labels", JSON.stringify(labels));
-    sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
-    sessionStorage.setItem("revista_preview_meta", JSON.stringify(revista));
-    setIsRouteLoading(true);
+  routeLockRef.current = true;
 
-    window.setTimeout(() => {
-      router.push("/preview");
+  sessionStorage.setItem("revista_labels", JSON.stringify(labels));
+  sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
+  sessionStorage.setItem("revista_preview_meta", JSON.stringify(revista));
 
-      window.setTimeout(() => {
-        if (window.location.pathname !== "/preview") {
-          window.location.assign("/preview");
-        }
-      }, 700);
-    }, 850);
+  if (flow) {
+    sessionStorage.setItem("revista_flow", flow);
   }
 
+  setIsRouteLoading(true);
+
+  const target = "/preview";
+
+  window.setTimeout(() => {
+    router.push(target);
+
+    window.setTimeout(() => {
+      if (window.location.pathname !== "/preview") {
+        window.location.assign(target);
+      }
+    }, 700);
+  }, 850);
+}
   return (
     <MotionConfig reducedMotion="user">
       <main className="min-h-screen overflow-x-hidden bg-[#101011] px-3 py-4 text-[#221d20] sm:px-5 lg:px-7">
@@ -321,7 +529,7 @@ export default function ProductsPage() {
                         <button
                           key={label.id}
                           type="button"
-                          onClick={() => setActiveLabelId(label.id)}
+                          onClick={() => handleLabelChange(label.id)}
                           className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-[11px] font-black text-white shadow-[0_8px_18px_rgba(0,0,0,.12)] transition active:scale-[0.97] ${
                             activeLabelId === label.id ? "ring-4 ring-[#A52E64]/15" : ""
                           }`}
@@ -429,24 +637,26 @@ export default function ProductsPage() {
                         transition={{ duration: 0.2 }}
                         className="grid gap-2"
                       >
-                        {filteredProducts.length > 0 ? (
-                          filteredProducts.map((product) => (
+                        {isSearching ? (
+                          <EmptyBox text="Buscando productos en Zoho CRM..." />
+                        ) : searchError ? (
+                          <EmptyBox text={searchError} />
+                        ) : searchResults.length > 0 ? (
+                          searchResults.map((product) => (
                             <button
                               key={product.id}
                               type="button"
                               onClick={() => selectProduct(product)}
                               className="group flex min-h-[62px] items-center gap-3 rounded-[17px] border border-[#c4bcc0] bg-[#e9e4e6] px-3 py-2 text-left shadow-[inset_0_1px_0_rgba(255,255,255,.45)] transition hover:-translate-y-0.5 hover:border-[#A52E64]/45 hover:bg-[#eee9eb] active:scale-[0.99]"
                             >
-                              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-[#A52E64]/10 text-[11px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
-                                {product.factoryCode.slice(0, 4)}
-                              </span>
+                              <ProductThumb product={product} small />
 
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-[12.5px] font-black text-[#241f22]">
                                   {product.name}
                                 </span>
                                 <span className="mt-0.5 block truncate text-[10.5px] font-semibold text-[#756b70]">
-                                  {product.code} · {product.category} · Gs. {product.price}
+                                  {product.code} · {product.category} · {product.price}
                                 </span>
                               </span>
 
@@ -469,11 +679,11 @@ export default function ProductsPage() {
                       description={description}
                       labels={labels}
                       activeLabelId={activeLabelId}
-                      onSheetChange={setSheet}
-                      onColumnChange={setColumn}
+                      onSheetChange={handleSheetChange}
+                      onColumnChange={handleColumnChange}
                       onRowChange={setRow}
                       onDescriptionChange={setDescription}
-                      onLabelChange={setActiveLabelId}
+                      onLabelChange={handleLabelChange}
                       onClear={clearSelection}
                       onPreview={openPreview}
                       canPreview={canPreviewSelected}
@@ -486,11 +696,11 @@ export default function ProductsPage() {
               </FormCard>
 
               <FormCard
-                eyebrow="Lista"
-                title="Productos agregados"
-                subtitle="Agrupados por hoja y posición"
-                icon={<Layers3 />}
-              >
+  eyebrow="Lista"
+  title="Productos agregados"
+  subtitle="Organizados por hoja, columna, fila y etiqueta"
+  icon={<Layers3 />}
+>
                 <div className="grid gap-4">
                   {addedProducts.length > 0 ? (
                     <div className="grid gap-4">
@@ -501,8 +711,8 @@ export default function ProductsPage() {
                               Hoja {group.sheetNumber}
                             </h3>
                             <span className="text-[10px] font-black text-[#81777b]">
-                              {group.products.length} art.
-                            </span>
+  {group.products.length} producto{group.products.length === 1 ? "" : "s"}
+</span>
                           </div>
 
                           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -656,10 +866,7 @@ function Intro({
   revista,
 }: {
   addedProducts: number;
-  revista: {
-    number: number;
-    maxArticles: number;
-  };
+  revista: RevistaMeta;
 }) {
   return (
     <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
@@ -793,16 +1000,14 @@ function SelectedProductCard({
       className="rounded-[20px] border border-[#A52E64]/25 bg-[#A52E64]/10 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.35)]"
     >
       <div className="mb-3 flex items-start gap-3">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] bg-[#A52E64]/10 text-[11px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
-          {product.factoryCode.slice(0, 4)}
-        </div>
+        <ProductThumb product={product} />
 
         <div className="min-w-0 flex-1">
           <h4 className="truncate text-[13px] font-black text-[#241f22]">
             {product.name}
           </h4>
           <p className="mt-1 text-[11px] font-bold text-[#655c61]">
-            {product.code} · {product.category} · Gs. {product.price}
+            {product.code} · {product.category} · {product.price}
           </p>
         </div>
 
@@ -962,34 +1167,6 @@ function LabelPicker({
   );
 }
 
-function onlyNumber(value: string) {
-  return value.replace(/\D/g, "");
-}
-
-function limitedNumber(value: string, max: number) {
-  const clean = onlyNumber(value);
-  if (!clean) return "";
-
-  return String(Math.min(max, Math.max(1, Number(clean))));
-}
-
-function clampLimit(value: unknown, min: number, max: number, fallback: number) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(number)));
-}
-
-function SmallField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="grid gap-1.5">
-      <span className="text-[9px] font-black uppercase tracking-[0.13em] text-[#5f555a]">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
 function MiniProductCard({
   product,
   label,
@@ -1005,24 +1182,31 @@ function MiniProductCard({
         className="flex items-center justify-between gap-3 px-3 py-2 text-white"
         style={{ backgroundColor: label?.color ?? "#A52E64" }}
       >
-        <span className="truncate text-[10.5px] font-black">{product.category}</span>
-        <span className="text-[10px] font-black opacity-80">
-          Col. {product.column} · Fila {product.row}
+        <span className="truncate text-[10.5px] font-black">
+          {label?.title ?? product.category}
+        </span>
+
+        <span className="text-[10px] font-black opacity-85">
+          Hoja {product.sheet} · Columna {product.column} · Fila {product.row}
         </span>
       </div>
 
       <div className="flex gap-3 p-3">
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-[#A52E64]/10 text-[10px] font-black text-[#A52E64]">
-          {product.factoryCode.slice(0, 4)}
-        </div>
+        <ProductThumb product={product} small />
 
         <div className="min-w-0 flex-1">
           <h4 className="truncate text-[12.5px] font-black text-[#241f22]">
             {product.name}
           </h4>
+
           <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
-            {product.code} · Grupo: {label?.title ?? "Sin etiqueta"}
+            Código: {product.code} · Etiqueta: {label?.title ?? "Sin etiqueta"}
           </p>
+
+          <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
+            Hoja {product.sheet} · Columna {product.column} · Fila {product.row}
+          </p>
+
           <p className="mt-2 line-clamp-2 text-[10.5px] font-semibold leading-relaxed text-[#756b70]">
             {product.customDescription || "Sin descripción."}
           </p>
@@ -1031,26 +1215,13 @@ function MiniProductCard({
         <button
           type="button"
           onClick={onRemove}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-red-50 text-red-700 transition hover:scale-105 active:scale-95"
-          aria-label="Quitar producto"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[#756b70] transition hover:bg-[#A52E64]/10 hover:text-[#A52E64] active:scale-95"
+          aria-label={`Eliminar ${product.name}`}
         >
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
     </article>
-  );
-}
-
-function EmptyProducts() {
-  return (
-    <div className="rounded-[18px] border border-dashed border-[#c4bcc0] bg-[#e9e4e6] px-4 py-8 text-center">
-      <div className="mx-auto grid h-12 w-12 place-items-center rounded-[16px] bg-[#A52E64]/10 text-[#A52E64]">
-        <BookOpen className="h-5 w-5" />
-      </div>
-      <p className="mt-3 text-[12px] font-bold leading-relaxed text-[#756b70]">
-        Aún no hay productos. Buscá, etiquetá y agregá artículos desde el catálogo.
-      </p>
-    </div>
   );
 }
 
@@ -1069,88 +1240,265 @@ function PreviewModal({
     <AnimatePresence>
       {product ? (
         <motion.div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/55 px-4 py-6 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-end bg-black/65 p-0 backdrop-blur-md sm:place-items-center sm:p-5"
-          onClick={onClose}
         >
           <motion.section
-            initial={{ opacity: 0, y: 28, scale: 0.98 }}
+            initial={{ opacity: 0, y: 18, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.98 }}
-            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            onClick={(event) => event.stopPropagation()}
-            className="w-full max-w-[520px] rounded-t-[28px] border border-white/35 bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-4 shadow-[0_30px_90px_rgba(0,0,0,.38),inset_0_1px_0_rgba(255,255,255,.54)] sm:rounded-[28px]"
+            exit={{ opacity: 0, y: 12, scale: 0.97 }}
+            transition={{ duration: 0.22 }}
+            className="w-full max-w-[560px] overflow-hidden rounded-[26px] border border-white/35 bg-[linear-gradient(180deg,#ebe7e8,#d9d4d6)] shadow-[0_34px_90px_rgba(0,0,0,.46),inset_0_1px_0_rgba(255,255,255,.68)]"
           >
-            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[#bdb5b9] sm:hidden" />
-
-            <div className="mb-4 flex items-start justify-between gap-3">
+            <div
+              className="flex items-center justify-between gap-3 px-5 py-4 text-white"
+              style={{ backgroundColor: label?.color ?? "#A52E64" }}
+            >
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#A52E64]">
+                <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-70">
                   Vista previa
                 </p>
-                <h3 className="mt-1 text-[24px] font-black tracking-[-0.06em] text-[#241f22]">
-                  Confirmar artículo
+                <h3 className="mt-1 text-[22px] font-black tracking-[-0.055em]">
+                  Confirmar producto
                 </h3>
               </div>
 
               <button
                 type="button"
                 onClick={onClose}
-                className="grid h-9 w-9 place-items-center rounded-full bg-[#e8e3e5] text-[#756b70] transition hover:text-[#A52E64]"
+                className="grid h-9 w-9 place-items-center rounded-full bg-white/15 transition hover:bg-white/25 active:scale-95"
+                aria-label="Cerrar vista previa"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="overflow-hidden rounded-[18px] border border-[#bdb5b9] bg-[#e9e4e6]">
-              <div
-                className="px-4 py-2 text-center text-[11px] font-black uppercase text-white"
-                style={{ backgroundColor: label?.color ?? "#A52E64" }}
-              >
-                {product.category}
-              </div>
+            <div className="grid gap-4 p-5">
+              <div className="flex gap-4 rounded-[20px] border border-[#bdb5b9] bg-[#e7e2e4] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
+                <ProductThumb product={product} />
 
-              <div className="p-4">
-                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#A52E64]">
-                  {product.brand}
-                </p>
-                <h4 className="mt-1 text-[18px] font-black leading-tight tracking-[-0.04em] text-[#241f22]">
-                  {product.name}
-                </h4>
-                <p className="mt-2 text-[12px] font-bold text-[#756b70]">
-                  Art: {product.code} · Fab: {product.factoryCode} · Gs. {product.price}
-                </p>
-
-                <div className="mt-4 grid grid-cols-3 gap-2">
-                  <InfoChip label="Hoja" value={String(product.sheet)} strong />
-                  <InfoChip label="Columna" value={String(product.column)} />
-                  <InfoChip label="Fila" value={String(product.row)} />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-[18px] font-black leading-tight tracking-[-0.045em] text-[#241f22]">
+                    {product.name}
+                  </h4>
+                  <p className="mt-1 text-[12px] font-bold text-[#756b70]">
+                    {product.code} · {product.category} · {product.price}
+                  </p>
+                  <p className="mt-3 text-[12.5px] font-semibold leading-relaxed text-[#5f555a]">
+                    {product.customDescription || "Sin descripción."}
+                  </p>
                 </div>
-
-                <p className="mt-4 whitespace-pre-line rounded-[14px] border border-[#c4bcc0] bg-[#eee9eb] p-3 text-[12px] font-semibold leading-relaxed text-[#655c61]">
-                  {product.customDescription || "Sin descripción."}
-                </p>
               </div>
-            </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_1.6fr]">
-              <button
-                type="button"
-                onClick={onClose}
-                className="min-h-11 rounded-[16px] border border-[#b9b0b5] bg-[#ebe7e8] px-4 text-[13px] font-black text-[#756b70] shadow-[inset_0_1px_0_rgba(255,255,255,.42)] transition hover:bg-[#e4dfe1] active:scale-[0.985]"
-              >
-                Cancelar
-              </button>
+              <div className="grid grid-cols-3 gap-2">
+                <InfoChip label="Hoja" value={String(product.sheet)} strong />
+                <InfoChip label="Columna" value={String(product.column)} />
+                <InfoChip label="Fila" value={String(product.row)} />
+              </div>
 
-              <button type="button" onClick={onConfirm} className="tc-primary-button">
-                Confirmar y agregar
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="min-h-12 flex-1 rounded-[16px] border border-[#bdb5b9] bg-[#e8e3e5] px-4 text-[12px] font-black text-[#332d31] transition hover:bg-[#eee9eb] active:scale-[0.99]"
+                >
+                  Corregir
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onConfirm}
+                  className="tc-primary-button min-h-12 flex-1"
+                >
+                  Agregar producto
+                </button>
+              </div>
             </div>
           </motion.section>
         </motion.div>
       ) : null}
     </AnimatePresence>
   );
+}
+
+function EmptyProducts() {
+  return (
+    <div className="grid gap-3 rounded-[18px] border border-dashed border-[#c4bcc0] bg-[#e9e4e6] px-4 py-7 text-center">
+      <div className="mx-auto grid h-12 w-12 place-items-center rounded-[15px] bg-[#A52E64]/10 text-[#A52E64]">
+        <BookOpen className="h-5 w-5" />
+      </div>
+      <div>
+        <p className="text-[14px] font-black text-[#241f22]">
+          Todavía no hay productos agregados.
+        </p>
+        <p className="mt-1 text-[12px] font-bold text-[#756b70]">
+          Buscá un producto, asigná posición y confirmá la vista previa.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ProductThumb({
+  product,
+  small,
+}: {
+  product: ProductRecord;
+  small?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const sizeClass = small ? "h-10 w-10 rounded-[12px]" : "h-12 w-12 rounded-[14px]";
+
+  if (product.coverUrl && !failed) {
+    return (
+      <div
+        className={`shrink-0 overflow-hidden border border-[#A52E64]/10 bg-white ${sizeClass}`}
+      >
+        <img
+          src={product.coverUrl}
+          alt={product.name}
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`grid shrink-0 place-items-center bg-[#A52E64]/10 text-[10px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10 ${sizeClass}`}
+    >
+      {(product.factoryCode || product.code || product.name).slice(0, 4)}
+    </div>
+  );
+}
+
+function SmallField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="text-[9px] font-black uppercase tracking-[0.13em] text-[#5f555a]">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function isValidProductLabel(value: unknown): value is ProductLabel {
+  if (!value || typeof value !== "object") return false;
+
+  const label = value as Partial<ProductLabel>;
+
+  return (
+    typeof label.id === "string" &&
+    label.id.trim().length > 0 &&
+    typeof label.title === "string" &&
+    label.title.trim().length > 0 &&
+    typeof label.color === "string" &&
+    label.color.trim().length > 0
+  );
+}
+
+function isValidAddedProduct(value: unknown): value is AddedProduct {
+  if (!value || typeof value !== "object") return false;
+
+  const product = value as Partial<AddedProduct>;
+
+  return (
+    typeof product.id === "string" &&
+    product.id.trim().length > 0 &&
+    typeof product.name === "string" &&
+    product.name.trim().length > 0 &&
+    Number(product.sheet) > 0 &&
+    Number(product.column) > 0 &&
+    Number(product.row) > 0 &&
+    typeof product.labelId === "string" &&
+    product.labelId.trim().length > 0
+  );
+}
+
+function normalizeApiProduct(product: ApiProductRecord): ProductRecord | null {
+  const id = product.id?.trim();
+  const name = product.nombre?.trim();
+
+  if (!id || !name) return null;
+
+  return {
+    id,
+    name,
+    code: product.codigo?.trim() || id,
+    factoryCode: product.codigoFabrica?.trim() || product.codigo?.trim() || id,
+    brand: product.marca?.trim() || "",
+    category: product.tipoMaquina?.trim() || "Producto",
+    price: product.precioFormateado?.trim() || formatGs(product.precioNumero),
+    priceNumber: Number(product.precioNumero) || 0,
+    priceBookName: product.priceBookName?.trim() || "",
+    description: product.descripcion?.trim() || "",
+    coverUrl: normalizeCoverUrl(product.portadaUrl),
+  };
+}
+
+function normalizeCoverUrl(value: unknown) {
+  if (typeof value !== "string") return "";
+
+  const clean = value.trim();
+  if (!clean) return "";
+
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+
+  if (clean.startsWith("/")) {
+    return build_api_url(clean);
+  }
+
+  return clean;
+}
+
+function formatGs(value: unknown) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return "Gs. 0";
+
+  return `Gs. ${new Intl.NumberFormat("es-PY").format(number)}`;
+}
+
+function onlyNumber(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function limitedNumber(value: string, max: number) {
+  const clean = onlyNumber(value);
+  if (!clean) return "";
+
+  return String(Math.min(max, Math.max(1, Number(clean))));
+}
+
+function clampLimit(value: unknown, min: number, max: number, fallback: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(number)));
+}
+function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk", "v"]) {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+
+  for (const param of paramsToRemove) {
+    if (url.searchParams.has(param)) {
+      url.searchParams.delete(param);
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  const cleanUrl =
+    url.pathname +
+    (url.searchParams.toString() ? `?${url.searchParams.toString()}` : "") +
+    url.hash;
+
+  window.history.replaceState(null, "", cleanUrl);
 }

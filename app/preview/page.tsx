@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
+import { get_flow_from_url } from "@/src/lib/api/flow";
 
 type ProductLabel = {
   id: string;
@@ -29,7 +30,10 @@ type AddedProduct = {
   brand: string;
   category: string;
   price: string;
+  priceNumber?: number;
+  priceBookName?: string;
   image?: string;
+  coverUrl?: string;
   description: string;
   sheet: number;
   column: number;
@@ -45,6 +49,8 @@ type RevistaMeta = {
   maxSheets: number;
   maxColumns: number;
   maxArticles: number;
+  tipoClientePrecio?: string;
+  recordId?: string;
 };
 
 const fallbackRevista: RevistaMeta = {
@@ -55,23 +61,165 @@ const fallbackRevista: RevistaMeta = {
   maxColumns: 1,
   maxArticles: 1,
 };
+function getApiBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_REVISTA_API_BASE_URL ??
+    "https://tc-gestor-revista-api.todocostura.workers.dev"
+  ).replace(/\/$/, "");
+}
 
+function sortPreviewProducts(items: AddedProduct[]) {
+  return items
+    .filter((item) => item && Number(item.sheet) > 0 && Number(item.column) > 0)
+    .sort((a, b) => {
+      if (Number(a.sheet) !== Number(b.sheet)) {
+        return Number(a.sheet) - Number(b.sheet);
+      }
+
+      if (Number(a.column) !== Number(b.column)) {
+        return Number(a.column) - Number(b.column);
+      }
+
+      if (Number(a.row) !== Number(b.row)) {
+        return Number(a.row) - Number(b.row);
+      }
+
+      return String(a.name || a.code).localeCompare(String(b.name || b.code));
+    });
+}
+
+function toText(value: unknown) {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildRevistaFromSavedSnapshot(
+  snapshot: Record<string, unknown>,
+): RevistaMeta {
+  const fields =
+    snapshot.snapshot_fields && typeof snapshot.snapshot_fields === "object"
+      ? (snapshot.snapshot_fields as Record<string, unknown>)
+      : {};
+
+  const metadata =
+    snapshot.metadata && typeof snapshot.metadata === "object"
+      ? (snapshot.metadata as Record<string, unknown>)
+      : {};
+
+  return {
+    ...fallbackRevista,
+    recordId: toText(snapshot.record_id),
+    number: toNumber(fields.nro ?? metadata.nro, 0),
+    title:
+      toText(fields.nombre_revista ?? metadata.nombre_revista) ||
+      fallbackRevista.title,
+    client:
+      toText(fields.cliente_nombre ?? metadata.cliente_nombre) ||
+      fallbackRevista.client,
+    maxSheets: toNumber(fields.max_hojas ?? metadata.max_hojas, 1),
+    maxColumns: toNumber(fields.max_columnas ?? metadata.max_columnas, 1),
+    maxArticles: toNumber(fields.max_articulos ?? metadata.max_articulos, 1),
+    tipoClientePrecio: toText(
+      fields.tipo_cliente_precio ?? metadata.tipo_cliente_precio,
+    ),
+  };
+}
 export default function PreviewPage() {
   const router = useRouter();
 
+  const [flow, setFlow] = useState("");
   const [revista, setRevista] = useState<RevistaMeta>(fallbackRevista);
   const [labels, setLabels] = useState<ProductLabel[]>([]);
   const [products, setProducts] = useState<AddedProduct[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [savedUrl, setSavedUrl] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [isSavingPreview, setIsSavingPreview] = useState(false);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [showCreatedToast, setShowCreatedToast] = useState(false);
+
   const saveLockRef = useRef(false);
   const routeLockRef = useRef(false);
 
   useEffect(() => {
+  let cancelled = false;
+
+  async function loadPreview() {
     try {
+      const url = new URL(window.location.href);
+      const savedToken = url.searchParams.get("tk") || "";
+
+      if (savedToken) {
+        const response = await fetch(
+          `${getApiBaseUrl()}/api/revista/preview/saved?tk=${encodeURIComponent(
+            savedToken,
+          )}`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
+            cache: "no-store",
+          },
+        );
+
+        const payload = await response.json();
+
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(
+            payload?.error?.message ||
+              payload?.message ||
+              payload?.error ||
+              "No se pudo cargar la revista guardada.",
+          );
+        }
+
+        const snapshot = (payload?.data ?? payload) as Record<string, unknown>;
+
+        if (cancelled) return;
+
+        const savedLabels = Array.isArray(snapshot.labels)
+          ? (snapshot.labels as ProductLabel[])
+          : [];
+
+        const savedProducts = Array.isArray(snapshot.productos)
+          ? sortPreviewProducts(snapshot.productos as AddedProduct[])
+          : [];
+
+        const savedRevista = buildRevistaFromSavedSnapshot(snapshot);
+
+        setFlow("");
+setRevista(savedRevista);
+setLabels(savedLabels);
+setProducts(savedProducts);
+setSaved(false);
+setSavedUrl("");
+
+cleanSensitiveUrlParams(["tk"]);
+
+        sessionStorage.setItem(
+          "revista_preview_meta",
+          JSON.stringify(savedRevista),
+        );
+        sessionStorage.setItem("revista_labels", JSON.stringify(savedLabels));
+        sessionStorage.setItem(
+          "revista_productos",
+          JSON.stringify(savedProducts),
+        );
+
+        return;
+      }
+
+      const currentFlow =
+        get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
+
+      setFlow(currentFlow);
+
       const rawMeta = sessionStorage.getItem("revista_preview_meta");
       const rawLabels = sessionStorage.getItem("revista_labels");
       const rawProducts = sessionStorage.getItem("revista_productos");
@@ -88,32 +236,23 @@ export default function PreviewPage() {
       if (rawProducts) {
         const parsedProducts = JSON.parse(rawProducts);
         if (Array.isArray(parsedProducts)) {
-          setProducts(
-            parsedProducts
-              .filter(
-                (item) =>
-                  item && Number(item.sheet) > 0 && Number(item.column) > 0,
-              )
-              .sort((a, b) => {
-                if (Number(a.sheet) !== Number(b.sheet))
-                  return Number(a.sheet) - Number(b.sheet);
-                if (Number(a.column) !== Number(b.column)) {
-                  return Number(a.column) - Number(b.column);
-                }
-                if (Number(a.row) !== Number(b.row))
-                  return Number(a.row) - Number(b.row);
-                return String(a.name || a.code).localeCompare(
-                  String(b.name || b.code),
-                );
-              }),
-          );
+          setProducts(sortPreviewProducts(parsedProducts as AddedProduct[]));
         }
       }
     } catch {
+      if (cancelled) return;
+
       setLabels([]);
       setProducts([]);
     }
-  }, []);
+  }
+
+  void loadPreview();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
 
   const sheets = useMemo(() => {
     const map = new Map<number, AddedProduct[]>();
@@ -140,6 +279,16 @@ export default function PreviewPage() {
     if (activeIndex > sheets.length - 1) setActiveIndex(0);
   }, [activeIndex, sheets.length]);
 
+  useEffect(() => {
+    if (!showCreatedToast) return;
+
+    const timeout = window.setTimeout(() => {
+      setShowCreatedToast(false);
+    }, 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [showCreatedToast]);
+
   const activeSheet = sheets[activeIndex] ?? null;
   const progress = Math.round(
     (products.length / Math.max(revista.maxArticles, 1)) * 100,
@@ -157,54 +306,118 @@ export default function PreviewPage() {
     setActiveIndex((current) => Math.min(sheets.length - 1, current + 1));
   }
 
-
-  useEffect(() => {
-    if (!showCreatedToast) return;
-
-    const timeout = window.setTimeout(() => {
-      setShowCreatedToast(false);
-    }, 2600);
-
-    return () => window.clearTimeout(timeout);
-  }, [showCreatedToast]);
-
   function goToProducts() {
     if (isRouteLoading || routeLockRef.current) return;
 
     routeLockRef.current = true;
     setIsRouteLoading(true);
 
+    const target = flow
+      ? `/products?flow=${encodeURIComponent(flow)}`
+      : "/products";
+
     window.setTimeout(() => {
-      router.push("/products");
+      router.push(target);
 
       window.setTimeout(() => {
         if (window.location.pathname !== "/products") {
-          window.location.assign("/products");
+          window.location.assign(target);
         }
       }, 700);
     }, 850);
   }
 
-  function savePreview() {
-    if (products.length === 0 || isSavingPreview || saved || saveLockRef.current) return;
-
-    saveLockRef.current = true;
-    setIsSavingPreview(true);
-
-    window.setTimeout(() => {
-      const snapshot = {
-        revista,
-        labels,
-        products,
-        savedAt: new Date().toISOString(),
-      };
-
-      sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
-      setSaved(true);
-      setIsSavingPreview(false);
-      setShowCreatedToast(true);
-    }, 950);
+ async function savePreview() {
+  if (products.length === 0 || isSavingPreview || saved || saveLockRef.current) {
+    return;
   }
+
+  saveLockRef.current = true;
+  setIsSavingPreview(true);
+  setSaveError("");
+
+  try {
+    const snapshot = {
+      revista,
+      labels,
+      products,
+      total_productos: products.length,
+      total_hojas: sheets.length,
+      savedAt: new Date().toISOString(),
+      storage: "cloudflare_kv",
+    };
+
+    const apiBaseUrl = (
+      process.env.NEXT_PUBLIC_REVISTA_API_BASE_URL ??
+      "https://tc-gestor-revista-api.todocostura.workers.dev"
+    ).replace(/\/$/, "");
+
+    const response = await fetch(
+      `${apiBaseUrl}/api/revista/save-pdf?flow=${encodeURIComponent(flow)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          record_id: revista.recordId,
+          productos: products,
+          labels,
+          metadata: {
+            nro: revista.number,
+            nombre_revista: revista.title,
+            cliente_nombre: revista.client,
+            max_hojas: revista.maxSheets,
+            max_columnas: revista.maxColumns,
+            max_articulos: revista.maxArticles,
+            tipo_cliente_precio: revista.tipoClientePrecio,
+          },
+        }),
+      },
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || data?.ok === false) {
+      throw new Error(
+        data?.error?.message ||
+          data?.message ||
+          data?.error ||
+          "No se pudo guardar la revista.",
+      );
+    }
+
+    const result = data?.data ?? data;
+    const finalUrl = String(result?.final_url || "");
+
+    if (!finalUrl) {
+      throw new Error("El API no devolvió el link final de la revista.");
+    }
+
+    sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
+    sessionStorage.setItem("revista_saved_state", JSON.stringify(snapshot));
+    sessionStorage.setItem(
+      "revista_saved_token",
+      String(result?.saved_token || ""),
+    );
+    sessionStorage.setItem("revista_saved_final_url", finalUrl);
+
+    setSaved(true);
+setSavedUrl("");
+cleanSensitiveUrlParams(["flow", "tk"]);
+setShowCreatedToast(true);
+  } catch (error) {
+    saveLockRef.current = false;
+    setSaveError(
+      error instanceof Error
+        ? error.message
+        : "No se pudo guardar la revista.",
+    );
+  } finally {
+    setIsSavingPreview(false);
+  }
+}
 
   return (
     <MotionConfig reducedMotion="user">
@@ -241,6 +454,12 @@ export default function PreviewPage() {
               </div>
             </div>
           </section>
+
+          {saveError ? (
+            <section className="mt-4 rounded-[18px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 py-3 text-[12px] font-black leading-relaxed text-[#A52E64]">
+              {saveError}
+            </section>
+          ) : null}
 
           <section className="mt-4 grid gap-4">
             {activeSheet ? (
@@ -304,7 +523,6 @@ export default function PreviewPage() {
   );
 }
 
-
 function CreatedToast({ show }: { show: boolean }) {
   return (
     <AnimatePresence>
@@ -323,10 +541,10 @@ function CreatedToast({ show }: { show: boolean }) {
           </span>
           <span className="min-w-0">
             <span className="block text-[14px] font-black tracking-[-0.035em]">
-              Revista creada
+              Revista guardada
             </span>
             <span className="mt-0.5 block text-[11px] font-bold text-[#f4f1f3]/58">
-              La revista se guardó correctamente.
+              La revista se registró correctamente.
             </span>
           </span>
         </motion.div>
@@ -439,14 +657,18 @@ function RailItem({
           {title}
         </div>
         <div
-          className={`text-[10px] font-black ${active ? "text-white/50" : "text-[#7b7277]"}`}
+          className={`text-[10px] font-black ${
+            active ? "text-white/50" : "text-[#7b7277]"
+          }`}
         >
           {subtitle}
         </div>
       </div>
 
       <span
-        className={`text-[11px] font-black ${active ? "text-white/50" : "text-[#8a8085]"}`}
+        className={`text-[11px] font-black ${
+          active ? "text-white/50" : "text-[#8a8085]"
+        }`}
       >
         {number}
       </span>
@@ -607,6 +829,12 @@ function InfoChip({
   );
 }
 
+type ProductPreviewGroup = {
+  key: string;
+  labelId: string;
+  products: AddedProduct[];
+};
+
 function MagazineSheet({
   sheetNumber,
   products,
@@ -618,6 +846,8 @@ function MagazineSheet({
   getLabel: (labelId: string) => ProductLabel | undefined;
   revista: RevistaMeta;
 }) {
+  const groups = buildProductGroups(products);
+
   return (
     <motion.section
       key={sheetNumber}
@@ -636,7 +866,7 @@ function MagazineSheet({
           </h2>
           <p className="mt-2 text-[12px] font-bold text-[#f4f1f3]/60">
             {products.length} artículo{products.length === 1 ? "" : "s"} en esta
-            hoja.
+            hoja · {groups.length} grupo{groups.length === 1 ? "" : "s"}.
           </p>
         </div>
 
@@ -650,106 +880,247 @@ function MagazineSheet({
         </div>
       </header>
 
-      <div className="p-4 sm:p-5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {products.map((product) => (
-            <ProductPreviewCard
-              key={`${product.id}-${product.sheet}-${product.column}-${product.row}`}
-              product={product}
-              label={getLabel(product.labelId)}
-            />
-          ))}
-        </div>
+      <div className="grid gap-4 p-4 sm:p-5">
+        {groups.map((group) => (
+          <ProductPreviewLabelGroup
+            key={group.key}
+            group={group}
+            label={getLabel(group.labelId)}
+          />
+        ))}
       </div>
     </motion.section>
   );
 }
 
-function ProductPreviewCard({
-  product,
+function buildProductGroups(products: AddedProduct[]): ProductPreviewGroup[] {
+  const map = new Map<string, ProductPreviewGroup>();
+
+  for (const product of products) {
+    const labelId = product.labelId || `sin-etiqueta-${product.sheet}`;
+    const key = `${product.sheet}-${labelId}`;
+
+    const current =
+      map.get(key) ??
+      ({
+        key,
+        labelId: product.labelId || "",
+        products: [],
+      } satisfies ProductPreviewGroup);
+
+    current.products.push(product);
+    map.set(key, current);
+  }
+
+  return Array.from(map.values())
+    .map((group) => ({
+      ...group,
+      products: [...group.products].sort((a, b) => {
+        if (a.column !== b.column) return a.column - b.column;
+        if (a.row !== b.row) return a.row - b.row;
+        return a.name.localeCompare(b.name);
+      }),
+    }))
+    .sort((a, b) => {
+      const aFirst = a.products[0];
+      const bFirst = b.products[0];
+
+      if ((aFirst?.column ?? 0) !== (bFirst?.column ?? 0)) {
+        return (aFirst?.column ?? 0) - (bFirst?.column ?? 0);
+      }
+
+      if ((aFirst?.row ?? 0) !== (bFirst?.row ?? 0)) {
+        return (aFirst?.row ?? 0) - (bFirst?.row ?? 0);
+      }
+
+      return a.key.localeCompare(b.key);
+    });
+}
+
+function getLabelGridClass(productCount: number) {
+  if (productCount <= 1) return "grid-cols-1 sm:grid-cols-[minmax(0,420px)]";
+  if (productCount === 2) return "grid-cols-1 md:grid-cols-2";
+  if (productCount === 3) return "grid-cols-1 md:grid-cols-3";
+  return "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4";
+}
+
+function ProductPreviewLabelGroup({
+  group,
   label,
 }: {
-  product: AddedProduct;
+  group: ProductPreviewGroup;
   label?: ProductLabel;
 }) {
-  const lines = (product.customDescription || product.description || "")
+  const firstProduct = group.products[0];
+  const groupTitle =
+    label?.title || firstProduct?.category || "Grupo sin etiqueta";
+  const gridClass = getLabelGridClass(group.products.length);
+
+  return (
+    <section className="overflow-hidden rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
+      <div
+        className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 text-white"
+        style={{ backgroundColor: label?.color ?? "#A52E64" }}
+      >
+        <span className="truncate text-[12px] font-black uppercase tracking-[-0.02em]">
+          {groupTitle}
+        </span>
+
+        <span className="shrink-0 text-[10px] font-black opacity-85">
+          {group.products.length} art.
+        </span>
+      </div>
+
+      <div className={`grid items-start gap-3 p-4 ${gridClass}`}>
+        {group.products.map((product) => (
+          <ProductPreviewItem
+            key={`${product.id}-${product.sheet}-${product.column}-${product.row}`}
+            product={product}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProductPreviewItem({ product }: { product: AddedProduct }) {
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+
+  const description = (product.customDescription || product.description || "").trim();
+  const hasDescription = description.length > 0;
+  const descriptionLines = description
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
 
   return (
-    <article className="overflow-hidden rounded-[20px] border border-[#bdb5b9] bg-[#ebe7e8] shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_44px_rgba(0,0,0,.15),inset_0_1px_0_rgba(255,255,255,.58)]">
-      <div
-        className="flex min-h-10 items-center justify-between gap-3 px-4 py-2 text-white"
-        style={{ backgroundColor: label?.color ?? "#A52E64" }}
-      >
-        <span className="truncate text-[11px] font-black uppercase">
-          {product.category}
-        </span>
-        <span className="text-[10px] font-black opacity-80">
-          C{product.column} · F{product.row}
-        </span>
-      </div>
+    <article className="relative grid h-[430px] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[16px] border border-[#c4bcc0] bg-[#f3eff1] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
+      <ProductPreviewImage product={product} />
 
-      <div className="p-4">
-        <div className="mb-4 grid h-28 place-items-center rounded-[16px] border border-[#c4bcc0] bg-[#f2eef0]">
-          {product.image ? (
-            <img
-              src={product.image}
-              alt={product.name}
-              className="max-h-full max-w-full object-contain"
-            />
-          ) : (
-            <div className="grid h-16 w-16 place-items-center rounded-[18px] bg-[#A52E64]/10 text-[13px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
-              {product.factoryCode?.slice(0, 4) ||
-                product.code?.slice(0, 4) ||
-                "TC"}
-            </div>
-          )}
-        </div>
-
-        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#A52E64]">
-          {product.brand || "Todo Costura"}
+      <div className="min-h-0 pt-3">
+        <p className="truncate text-[10px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+          {product.brand || "Sin marca"}
         </p>
 
-        <p className="mt-1 text-[10.5px] font-bold text-[#81777b]">
-          Art: {product.code} · Fab: {product.factoryCode}
+        <p className="mt-1 truncate text-[10.5px] font-bold text-[#756b70]">
+          Art: {product.code || "—"} · Fab: {product.factoryCode || "—"}
         </p>
 
-        <h3 className="mt-2 text-[16px] font-black leading-tight tracking-[-0.045em] text-[#241f22]">
+        <h3 className="mt-3 line-clamp-3 text-[14px] font-black uppercase leading-tight tracking-[-0.04em] text-[#241f22]">
           {product.name}
         </h3>
 
-        <div className="mt-3 grid gap-1.5">
-          {lines.length > 0 ? (
-            lines.slice(0, 5).map((line) => (
-              <p
-                key={line}
-                className="text-[11.5px] font-semibold leading-relaxed text-[#655c61]"
-              >
-                • {line}
-              </p>
-            ))
-          ) : (
-            <p className="text-[11.5px] font-semibold italic leading-relaxed text-[#81777b]">
-              Sin descripción.
-            </p>
-          )}
-        </div>
-
         <div className="mt-4 flex flex-wrap gap-2">
-          <span className="rounded-full bg-[#A52E64]/10 px-3 py-1 text-[10px] font-black text-[#A52E64]">
+          <span className="rounded-full bg-[#A52E64]/10 px-3 py-1 text-[9px] font-black text-[#A52E64]">
             Hoja {product.sheet}
           </span>
-          <span className="rounded-full bg-[#e2dddf] px-3 py-1 text-[10px] font-black text-[#756b70]">
+
+          <span className="rounded-full bg-[#ddd7da] px-3 py-1 text-[9px] font-black text-[#62595d]">
             Columna {product.column}
           </span>
-          <span className="rounded-full bg-[#e2dddf] px-3 py-1 text-[10px] font-black text-[#756b70]">
+
+          <span className="rounded-full bg-[#ddd7da] px-3 py-1 text-[9px] font-black text-[#62595d]">
             Fila {product.row}
           </span>
         </div>
       </div>
+
+      <div className="mt-3 border-t border-[#d4cdd0] pt-3">
+        {hasDescription ? (
+          <button
+            type="button"
+            onClick={() => setDescriptionOpen((current) => !current)}
+            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-[13px] border border-[#c4bcc0] bg-[#ebe7e8] px-3 text-left text-[11px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.45)] transition hover:bg-[#A52E64]/10 active:scale-[0.99]"
+            aria-expanded={descriptionOpen}
+          >
+            <span>{descriptionOpen ? "Ocultar descripción" : "Ver descripción"}</span>
+            <ChevronRight
+              className={`h-4 w-4 shrink-0 transition ${
+                descriptionOpen ? "rotate-90" : ""
+              }`}
+            />
+          </button>
+        ) : (
+          <div className="grid min-h-10 place-items-center rounded-[13px] border border-dashed border-[#c4bcc0] bg-[#ebe7e8] px-3 text-[11px] font-bold text-[#8a8085]">
+            Sin descripción
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {descriptionOpen && hasDescription ? (
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="absolute inset-x-3 bottom-3 z-10 max-h-[190px] overflow-hidden rounded-[15px] border border-[#A52E64]/25 bg-[#f7f2f4] shadow-[0_18px_45px_rgba(0,0,0,.22),inset_0_1px_0_rgba(255,255,255,.65)]"
+          >
+            <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[#e1d7dc] bg-[#A52E64]/10 px-3">
+              <span className="text-[10px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+                Descripción
+              </span>
+              <button
+                type="button"
+                onClick={() => setDescriptionOpen(false)}
+                className="rounded-full px-2 py-1 text-[10px] font-black text-[#A52E64] transition hover:bg-[#A52E64]/10"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="max-h-[146px] overflow-y-auto px-3 py-2 text-[11px] font-bold leading-relaxed text-[#655c61]">
+              {descriptionLines.map((line, index) => (
+                <p key={`${product.id}-description-line-${index}`} className="py-0.5">
+                  • {line}
+                </p>
+              ))}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </article>
+  );
+}
+
+function ProductPreviewImage({ product }: { product: AddedProduct }) {
+  const imageCandidates = [
+    product.image || "",
+    product.coverUrl || "",
+    product.id
+      ? `https://tc-gestor-revista-api.todocostura.workers.dev/api/revista/products/photo?id=${encodeURIComponent(
+          product.id,
+        )}`
+      : "",
+  ].filter(Boolean);
+
+  const [imageIndex, setImageIndex] = useState(0);
+  const imageUrl = imageCandidates[imageIndex] || "";
+
+  function handleImageError() {
+    setImageIndex((current) => {
+      const next = current + 1;
+      return next < imageCandidates.length ? next : current;
+    });
+  }
+
+  return (
+    <div className="grid h-[150px] place-items-center overflow-visible rounded-[14px] border border-[#c4bcc0] bg-white p-2">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={product.name}
+          className="block h-auto max-h-[140px] w-auto max-w-full object-contain"
+          onError={handleImageError}
+        />
+      ) : (
+        <div className="grid h-16 w-16 place-items-center rounded-[18px] bg-[#A52E64]/10 text-[13px] font-black text-[#A52E64] ring-1 ring-[#A52E64]/10">
+          {product.factoryCode?.slice(0, 4) ||
+            product.code?.slice(0, 4) ||
+            "TC"}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -773,4 +1144,162 @@ function EmptyState({
       </p>
     </div>
   );
+}
+
+function buildPdfFilename(revista: RevistaMeta) {
+  const nro = revista.number ? `revista-${revista.number}` : "revista";
+  const title = slugify(revista.title || "sin-titulo");
+
+  return `${nro}-${title}.pdf`;
+}
+
+function buildRevistaPdfBase64({
+  revista,
+  labels,
+  products,
+}: {
+  revista: RevistaMeta;
+  labels: ProductLabel[];
+  products: AddedProduct[];
+}) {
+  const lines: string[] = [
+    "TODO COSTURA",
+    `Revista #${revista.number || ""}`,
+    revista.title,
+    `Cliente: ${revista.client}`,
+    `Articulos: ${products.length}`,
+    "",
+  ];
+
+  const sortedProducts = [...products].sort((a, b) => {
+    if (a.sheet !== b.sheet) return a.sheet - b.sheet;
+    if (a.column !== b.column) return a.column - b.column;
+    if (a.row !== b.row) return a.row - b.row;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const product of sortedProducts) {
+    const label = labels.find((item) => item.id === product.labelId);
+
+    lines.push(
+      `Hoja ${product.sheet} - Columna ${product.column} - Fila ${product.row}`,
+      `${product.name}`,
+      `Codigo: ${product.code}`,
+      `Marca: ${product.brand || ""}`,
+      `Etiqueta: ${label?.title || "Sin etiqueta"}`,
+      `Precio: ${product.price || ""}`,
+    );
+
+    const description = product.customDescription || product.description;
+    if (description) {
+      lines.push(`Descripcion: ${description}`);
+    }
+
+    lines.push("");
+  }
+
+  return createSimplePdfBase64(lines);
+}
+
+function createSimplePdfBase64(lines: string[]) {
+  const sanitizedLines = lines.flatMap((line) => {
+    const clean = toPdfText(line);
+    const chunks: string[] = [];
+
+    for (let i = 0; i < clean.length; i += 82) {
+      chunks.push(clean.slice(i, i + 82));
+    }
+
+    return chunks.length > 0 ? chunks : [""];
+  });
+
+  const contentLines = [
+    "BT",
+    "/F1 10 Tf",
+    "50 792 Td",
+    "14 TL",
+    ...sanitizedLines
+      .slice(0, 52)
+      .map((line) => `(${escapePdfText(line)}) Tj T*`),
+    "ET",
+  ];
+
+  const content = contentLines.join("\n");
+
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const xrefOffset = pdf.length;
+
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+
+  for (let index = 1; index < offsets.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF`;
+
+  return btoa(pdf);
+}
+
+function toPdfText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "")
+    .trim();
+}
+
+function escapePdfText(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk"]) {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+
+  for (const param of paramsToRemove) {
+    if (url.searchParams.has(param)) {
+      url.searchParams.delete(param);
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  const cleanUrl =
+    url.pathname +
+    (url.searchParams.toString() ? `?${url.searchParams.toString()}` : "") +
+    url.hash;
+
+  window.history.replaceState(null, "", cleanUrl);
 }
