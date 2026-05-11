@@ -24,6 +24,7 @@ import {
   update_revista,
 } from "@/src/lib/api/flow";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { validate_revista_session } from "@/src/lib/api/session";
 
 type ClientType = "contacto" | "empresa";
 
@@ -130,38 +131,71 @@ export default function EditPage() {
   const [isSavingChanges, setIsSavingChanges] = useState(false);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [accessStatus, setAccessStatus] = useState<
+    "checking" | "authorized" | "unauthorized"
+  >("checking");
 
   const saveLockRef = useRef(false);
   const routeLockRef = useRef(false);
 
   useEffect(() => {
-    const urlFlow = get_flow_from_url();
-    const storedFlow = sessionStorage.getItem("revista_flow") || "";
-    const currentFlow = urlFlow || storedFlow;
+    let cancelled = false;
 
-    const params = new URL(window.location.href).searchParams;
-    const recordId =
-      params.get("record_id") ||
-      params.get("id") ||
-      params.get("creator_record_id") ||
-      "";
+    async function initializeEditAccess() {
+      const urlFlow = get_flow_from_url();
+      const storedFlow = sessionStorage.getItem("revista_flow") || "";
+      const currentFlow = urlFlow || storedFlow;
 
-    setFlow(currentFlow);
+      const params = new URL(window.location.href).searchParams;
+      const recordId =
+        params.get("record_id") ||
+        params.get("id") ||
+        params.get("creator_record_id") ||
+        "";
 
-    if (currentFlow) {
-      sessionStorage.setItem("revista_flow", currentFlow);
+      try {
+        if (!currentFlow) {
+          throw new Error("La sesión de acceso no está activa.");
+        }
+
+        await validate_revista_session(currentFlow);
+
+        if (cancelled) return;
+
+        setAccessStatus("authorized");
+        setFlow(currentFlow);
+        sessionStorage.setItem("revista_flow", currentFlow);
+
+        cleanSensitiveUrlParams();
+
+        if (recordId) {
+          void loadRevistaById(recordId, currentFlow);
+        }
+      } catch {
+        if (cancelled) return;
+
+        setAccessStatus("unauthorized");
+        setFlow("");
+        sessionStorage.removeItem("revista_flow");
+        cleanSensitiveUrlParams();
+
+        setErrorMessage(
+          "Acceso no autorizado. Ingresá nuevamente desde Zoho Creator.",
+        );
+      }
     }
 
-    cleanSensitiveUrlParams();
+    void initializeEditAccess();
 
-    if (recordId) {
-      void loadRevistaById(recordId, currentFlow);
-    }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     const clean = query.trim();
 
+    if (accessStatus !== "authorized") return;
     if (selectedRevista) return;
 
     if (clean.length < 1) {
@@ -208,11 +242,12 @@ export default function EditPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [query, selectedRevista]);
+  }, [accessStatus, query, selectedRevista]);
 
   useEffect(() => {
     const clean = clientQuery.trim();
 
+    if (accessStatus !== "authorized") return;
     if (!changeClient || !originalClient || workingClient) return;
 
     if (clean.length < 1) {
@@ -258,7 +293,7 @@ export default function EditPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [changeClient, clientQuery, originalClient, workingClient]);
+  }, [accessStatus, changeClient, clientQuery, originalClient, workingClient]);
 
   const progress = selectedRevista ? (dirty ? 72 : 100) : 25;
 
@@ -596,6 +631,21 @@ export default function EditPage() {
         >
           <AppHeader progress={progress} />
 
+          {accessStatus === "checking" ? (
+            <AccessStatusPanel
+              eyebrow="Validando acceso"
+              title="Verificando sesión"
+              description="Esperá un momento mientras verificamos que la sesión siga activa."
+            />
+          ) : accessStatus === "unauthorized" ? (
+            <AccessStatusPanel
+              eyebrow="Acceso restringido"
+              title="Acceso no autorizado"
+              description="Esta pantalla solo puede abrirse desde Zoho Creator con una sesión válida."
+              restricted
+            />
+          ) : (
+            <>
           <EditRail selected={Boolean(selectedRevista)} dirty={dirty} />
 
           <Intro
@@ -961,7 +1011,8 @@ export default function EditPage() {
                 ) : null}
               </AnimatePresence>
             </div>
-          </section>
+          </section>            </>
+          )}
         </motion.section>
       </main>
 
@@ -983,6 +1034,38 @@ export default function EditPage() {
         }
       />
     </MotionConfig>
+  );
+}
+
+function AccessStatusPanel({
+  eyebrow,
+  title,
+  description,
+  restricted,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  restricted?: boolean;
+}) {
+  return (
+    <section
+      className={`mt-4 rounded-[22px] border p-5 text-center shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.40)] ${
+        restricted
+          ? "border-[#A52E64]/25 bg-[#A52E64]/10"
+          : "border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)]"
+      }`}
+    >
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+        {eyebrow}
+      </p>
+      <h1 className="mt-2 text-[28px] font-black tracking-[-0.06em] text-[#241f22]">
+        {title}
+      </h1>
+      <p className="mx-auto mt-2 max-w-xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+        {description}
+      </p>
+    </section>
   );
 }
 
@@ -1699,7 +1782,8 @@ function normalizeEditRevista(
     productsFlow:
       readString(data, "products_flow_token") ||
       readString(data, "products_flow"),
-    previewToken: extractPreviewTokenFromRevista(data),
+    previewToken:
+      readString(data, "preview_token") || extractPreviewTokenFromRevista(data),
     client: {
       id: clientCode || "cliente",
       type: clientType,
@@ -2045,6 +2129,7 @@ function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk", "v"]) {
 
   window.history.replaceState(null, "", cleanUrl);
 }
+
 function parseRevistaNumber(value: unknown) {
   const clean = String(value ?? "")
     .replace(/#/g, "")

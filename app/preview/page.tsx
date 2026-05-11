@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { RouteTransitionOverlay } from "@/app/_components/route-transition-overlay";
 import { get_flow_from_url } from "@/src/lib/api/flow";
+import { validate_revista_session } from "@/src/lib/api/session";
 
 type ProductLabel = {
   id: string;
@@ -76,12 +77,12 @@ function sortPreviewProducts(items: AddedProduct[]) {
         return Number(a.sheet) - Number(b.sheet);
       }
 
-      if (Number(a.column) !== Number(b.column)) {
-        return Number(a.column) - Number(b.column);
-      }
-
       if (Number(a.row) !== Number(b.row)) {
         return Number(a.row) - Number(b.row);
+      }
+
+      if (Number(a.column) !== Number(b.column)) {
+        return Number(a.column) - Number(b.column);
       }
 
       return String(a.name || a.code).localeCompare(String(b.name || b.code));
@@ -142,117 +143,139 @@ export default function PreviewPage() {
   const [isSavingPreview, setIsSavingPreview] = useState(false);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
   const [showCreatedToast, setShowCreatedToast] = useState(false);
+  const [accessStatus, setAccessStatus] = useState<
+    "checking" | "authorized" | "unauthorized"
+  >("checking");
 
   const saveLockRef = useRef(false);
   const routeLockRef = useRef(false);
 
   useEffect(() => {
-  let cancelled = false;
+    let cancelled = false;
 
-  async function loadPreview() {
-    try {
-      const url = new URL(window.location.href);
-      const savedToken = url.searchParams.get("tk") || "";
+    async function loadPreview() {
+      try {
+        const url = new URL(window.location.href);
+        const savedToken = url.searchParams.get("tk") || "";
 
-      if (savedToken) {
-        const response = await fetch(
-          `${getApiBaseUrl()}/api/revista/preview/saved?tk=${encodeURIComponent(
-            savedToken,
-          )}`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
+        if (savedToken) {
+          const response = await fetch(
+            `${getApiBaseUrl()}/api/revista/preview/saved?tk=${encodeURIComponent(
+              savedToken,
+            )}`,
+            {
+              method: "GET",
+              headers: {
+                Accept: "application/json",
+              },
+              cache: "no-store",
             },
-            cache: "no-store",
-          },
-        );
-
-        const payload = await response.json();
-
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(
-            payload?.error?.message ||
-              payload?.message ||
-              payload?.error ||
-              "No se pudo cargar la revista guardada.",
           );
+
+          const payload = await response.json();
+
+          if (!response.ok || payload?.ok === false) {
+            throw new Error(
+              payload?.error?.message ||
+                payload?.message ||
+                payload?.error ||
+                "No se pudo cargar la revista guardada.",
+            );
+          }
+
+          const snapshot = (payload?.data ?? payload) as Record<
+            string,
+            unknown
+          >;
+
+          if (cancelled) return;
+
+          const savedLabels = Array.isArray(snapshot.labels)
+            ? (snapshot.labels as ProductLabel[])
+            : [];
+
+          const savedProducts = Array.isArray(snapshot.productos)
+            ? sortPreviewProducts(snapshot.productos as AddedProduct[])
+            : [];
+
+          const savedRevista = buildRevistaFromSavedSnapshot(snapshot);
+
+          setFlow("");
+          setAccessStatus("authorized");
+          setRevista(savedRevista);
+          setLabels(savedLabels);
+          setProducts(savedProducts);
+          setSaved(false);
+          setSavedUrl("");
+
+          cleanSensitiveUrlParams(["tk"]);
+
+          sessionStorage.setItem(
+            "revista_preview_meta",
+            JSON.stringify(savedRevista),
+          );
+          sessionStorage.setItem("revista_labels", JSON.stringify(savedLabels));
+          sessionStorage.setItem(
+            "revista_productos",
+            JSON.stringify(savedProducts),
+          );
+
+          return;
         }
 
-        const snapshot = (payload?.data ?? payload) as Record<string, unknown>;
+        const currentFlow =
+          get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
+
+        if (!currentFlow) {
+          throw new Error("La sesión de acceso no está activa.");
+        }
+
+        await validate_revista_session(currentFlow);
 
         if (cancelled) return;
 
-        const savedLabels = Array.isArray(snapshot.labels)
-          ? (snapshot.labels as ProductLabel[])
-          : [];
+        setFlow(currentFlow);
+        setAccessStatus("authorized");
+        sessionStorage.setItem("revista_flow", currentFlow);
+        cleanSensitiveUrlParams(["flow", "v"]);
 
-        const savedProducts = Array.isArray(snapshot.productos)
-          ? sortPreviewProducts(snapshot.productos as AddedProduct[])
-          : [];
+        const rawMeta = sessionStorage.getItem("revista_preview_meta");
+        const rawLabels = sessionStorage.getItem("revista_labels");
+        const rawProducts = sessionStorage.getItem("revista_productos");
 
-        const savedRevista = buildRevistaFromSavedSnapshot(snapshot);
-
-        setFlow("");
-setRevista(savedRevista);
-setLabels(savedLabels);
-setProducts(savedProducts);
-setSaved(false);
-setSavedUrl("");
-
-cleanSensitiveUrlParams(["tk"]);
-
-        sessionStorage.setItem(
-          "revista_preview_meta",
-          JSON.stringify(savedRevista),
-        );
-        sessionStorage.setItem("revista_labels", JSON.stringify(savedLabels));
-        sessionStorage.setItem(
-          "revista_productos",
-          JSON.stringify(savedProducts),
-        );
-
-        return;
-      }
-
-      const currentFlow =
-        get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
-
-      setFlow(currentFlow);
-
-      const rawMeta = sessionStorage.getItem("revista_preview_meta");
-      const rawLabels = sessionStorage.getItem("revista_labels");
-      const rawProducts = sessionStorage.getItem("revista_productos");
-
-      if (rawMeta) {
-        setRevista({ ...fallbackRevista, ...JSON.parse(rawMeta) });
-      }
-
-      if (rawLabels) {
-        const parsedLabels = JSON.parse(rawLabels);
-        if (Array.isArray(parsedLabels)) setLabels(parsedLabels);
-      }
-
-      if (rawProducts) {
-        const parsedProducts = JSON.parse(rawProducts);
-        if (Array.isArray(parsedProducts)) {
-          setProducts(sortPreviewProducts(parsedProducts as AddedProduct[]));
+        if (rawMeta) {
+          setRevista({ ...fallbackRevista, ...JSON.parse(rawMeta) });
         }
+
+        if (rawLabels) {
+          const parsedLabels = JSON.parse(rawLabels);
+          if (Array.isArray(parsedLabels)) setLabels(parsedLabels);
+        }
+
+        if (rawProducts) {
+          const parsedProducts = JSON.parse(rawProducts);
+          if (Array.isArray(parsedProducts)) {
+            setProducts(sortPreviewProducts(parsedProducts as AddedProduct[]));
+          }
+        }
+      } catch {
+        if (cancelled) return;
+
+        setAccessStatus("unauthorized");
+        setFlow("");
+        sessionStorage.removeItem("revista_flow");
+        setLabels([]);
+        setProducts([]);
+        cleanSensitiveUrlParams(["flow", "tk", "v"]);
       }
-    } catch {
-      if (cancelled) return;
-
-      setLabels([]);
-      setProducts([]);
     }
-  }
 
-  void loadPreview();
+    void loadPreview();
 
-  return () => {
-    cancelled = true;
-  };
-}, []);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sheets = useMemo(() => {
     const map = new Map<number, AddedProduct[]>();
@@ -267,9 +290,9 @@ cleanSensitiveUrlParams(["tk"]);
       .sort(([a], [b]) => a - b)
       .map(([sheet, items]) => ({
         sheet,
-        items: items.sort((a, b) => {
-          if (a.column !== b.column) return a.column - b.column;
+        items: [...items].sort((a, b) => {
           if (a.row !== b.row) return a.row - b.row;
+          if (a.column !== b.column) return a.column - b.column;
           return a.name.localeCompare(b.name);
         }),
       }));
@@ -307,6 +330,7 @@ cleanSensitiveUrlParams(["tk"]);
   }
 
   function goToProducts() {
+    if (accessStatus !== "authorized" || !flow) return;
     if (isRouteLoading || routeLockRef.current) return;
 
     routeLockRef.current = true;
@@ -327,187 +351,217 @@ cleanSensitiveUrlParams(["tk"]);
     }, 850);
   }
 
- async function savePreview() {
-  if (products.length === 0 || isSavingPreview || saved || saveLockRef.current) {
-    return;
-  }
+  async function savePreview() {
+    if (accessStatus !== "authorized" || !flow) return;
 
-  saveLockRef.current = true;
-  setIsSavingPreview(true);
-  setSaveError("");
+    if (
+      products.length === 0 ||
+      isSavingPreview ||
+      saved ||
+      saveLockRef.current
+    ) {
+      return;
+    }
 
-  try {
-    const snapshot = {
-      revista,
-      labels,
-      products,
-      total_productos: products.length,
-      total_hojas: sheets.length,
-      savedAt: new Date().toISOString(),
-      storage: "cloudflare_kv",
-    };
+    saveLockRef.current = true;
+    setIsSavingPreview(true);
+    setSaveError("");
 
-    const apiBaseUrl = (
-      process.env.NEXT_PUBLIC_REVISTA_API_BASE_URL ??
-      "https://tc-gestor-revista-api.todocostura.workers.dev"
-    ).replace(/\/$/, "");
+    try {
+      const snapshot = {
+        revista,
+        labels,
+        products,
+        total_productos: products.length,
+        total_hojas: sheets.length,
+        savedAt: new Date().toISOString(),
+        storage: "cloudflare_kv",
+      };
 
-    const response = await fetch(
-      `${apiBaseUrl}/api/revista/save-pdf?flow=${encodeURIComponent(flow)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({
-          record_id: revista.recordId,
-          productos: products,
-          labels,
-          metadata: {
-            nro: revista.number,
-            nombre_revista: revista.title,
-            cliente_nombre: revista.client,
-            max_hojas: revista.maxSheets,
-            max_columnas: revista.maxColumns,
-            max_articulos: revista.maxArticles,
-            tipo_cliente_precio: revista.tipoClientePrecio,
+      const apiBaseUrl = (
+        process.env.NEXT_PUBLIC_REVISTA_API_BASE_URL ??
+        "https://tc-gestor-revista-api.todocostura.workers.dev"
+      ).replace(/\/$/, "");
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/revista/save-pdf?flow=${encodeURIComponent(flow)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
           },
-        }),
-      },
-    );
-
-    const data = await response.json();
-
-    if (!response.ok || data?.ok === false) {
-      throw new Error(
-        data?.error?.message ||
-          data?.message ||
-          data?.error ||
-          "No se pudo guardar la revista.",
+          body: JSON.stringify({
+            record_id: revista.recordId,
+            productos: products,
+            labels,
+            metadata: {
+              nro: revista.number,
+              nombre_revista: revista.title,
+              cliente_nombre: revista.client,
+              max_hojas: revista.maxSheets,
+              max_columnas: revista.maxColumns,
+              max_articulos: revista.maxArticles,
+              tipo_cliente_precio: revista.tipoClientePrecio,
+            },
+          }),
+        },
       );
+
+      const data = await response.json();
+
+      if (!response.ok || data?.ok === false) {
+        throw new Error(
+          data?.error?.message ||
+            data?.message ||
+            data?.error ||
+            "No se pudo guardar la revista.",
+        );
+      }
+
+      const result = data?.data ?? data;
+      const finalUrl = String(result?.final_url || "");
+
+      if (!finalUrl) {
+        throw new Error("El API no devolvió el link final de la revista.");
+      }
+
+      sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
+      sessionStorage.setItem("revista_saved_state", JSON.stringify(snapshot));
+      sessionStorage.setItem(
+        "revista_saved_token",
+        String(result?.saved_token || ""),
+      );
+      sessionStorage.setItem("revista_saved_final_url", finalUrl);
+
+      setSaved(true);
+      setSavedUrl("");
+      cleanSensitiveUrlParams(["flow", "tk"]);
+      setShowCreatedToast(true);
+    } catch (error) {
+      saveLockRef.current = false;
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar la revista.",
+      );
+    } finally {
+      setIsSavingPreview(false);
     }
-
-    const result = data?.data ?? data;
-    const finalUrl = String(result?.final_url || "");
-
-    if (!finalUrl) {
-      throw new Error("El API no devolvió el link final de la revista.");
-    }
-
-    sessionStorage.setItem("revista_saved_preview", JSON.stringify(snapshot));
-    sessionStorage.setItem("revista_saved_state", JSON.stringify(snapshot));
-    sessionStorage.setItem(
-      "revista_saved_token",
-      String(result?.saved_token || ""),
-    );
-    sessionStorage.setItem("revista_saved_final_url", finalUrl);
-
-    setSaved(true);
-setSavedUrl("");
-cleanSensitiveUrlParams(["flow", "tk"]);
-setShowCreatedToast(true);
-  } catch (error) {
-    saveLockRef.current = false;
-    setSaveError(
-      error instanceof Error
-        ? error.message
-        : "No se pudo guardar la revista.",
-    );
-  } finally {
-    setIsSavingPreview(false);
   }
-}
 
   return (
     <MotionConfig reducedMotion="user">
-      <main className="min-h-screen overflow-x-hidden bg-[#101011] px-3 py-4 text-[#221d20] sm:px-5 lg:px-7">
-        <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_-18%,rgba(255,255,255,.08),transparent_32%),linear-gradient(180deg,#151416_0%,#101011_72%)]" />
+      <main className="tc-preview-page min-h-screen overflow-x-hidden bg-[#101011] px-3 py-4 text-[#221d20] sm:px-5 lg:px-7">
+        <div className="tc-screen-only pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_50%_-18%,rgba(255,255,255,.08),transparent_32%),linear-gradient(180deg,#151416_0%,#101011_72%)]" />
 
         <motion.section
           initial={{ opacity: 0, y: 18, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
-          className="relative mx-auto w-full max-w-[1180px] rounded-[30px] border border-white/35 bg-[linear-gradient(145deg,#e4dfe1,#d5d0d2_62%,#cbc5c8)] p-3 shadow-[0_34px_90px_rgba(0,0,0,.42),inset_0_1px_0_rgba(255,255,255,.75)] sm:p-5"
+          className="tc-preview-shell relative mx-auto w-full max-w-[1180px] rounded-[30px] border border-white/35 bg-[linear-gradient(145deg,#e4dfe1,#d5d0d2_62%,#cbc5c8)] p-3 shadow-[0_34px_90px_rgba(0,0,0,.42),inset_0_1px_0_rgba(255,255,255,.75)] sm:p-5"
         >
           <AppHeader progress={progress} />
 
-          <PreviewRail onProductsClick={goToProducts} />
+          {accessStatus === "checking" ? (
+            <AccessStatusPanel
+              eyebrow="Validando acceso"
+              title="Verificando sesión"
+              description="Esperá un momento mientras verificamos que la sesión siga activa."
+            />
+          ) : accessStatus === "unauthorized" ? (
+            <AccessStatusPanel
+              eyebrow="Acceso restringido"
+              title="Acceso no autorizado"
+              description="Esta pantalla solo puede abrirse desde Zoho Creator o mediante un link de preview válido."
+              restricted
+            />
+          ) : (
+            <>
+              <PreviewRail onProductsClick={goToProducts} />
 
-          <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
-                  Vista previa
-                </p>
-                <h1 className="mt-1 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
-                  Revisión final
-                </h1>
-                <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
-                  Verificá la composición por hoja antes de guardar la revista.
-                </p>
-              </div>
+              <section className="tc-screen-only mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+                      Vista previa
+                    </p>
+                    <h1 className="mt-1 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
+                      Revisión final
+                    </h1>
+                    <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+                      Verificá la composición por hoja antes de guardar la
+                      revista.
+                    </p>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-2 sm:min-w-[280px]">
-                <InfoChip label="Revista" value={`#${revista.number}`} strong />
-                <InfoChip label="Hojas" value={String(sheets.length)} />
-              </div>
-            </div>
-          </section>
-
-          {saveError ? (
-            <section className="mt-4 rounded-[18px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 py-3 text-[12px] font-black leading-relaxed text-[#A52E64]">
-              {saveError}
-            </section>
-          ) : null}
-
-          <section className="mt-4 grid gap-4">
-            {activeSheet ? (
-              <section className="min-w-0">
-                <SheetControlBar
-                  activeSheet={activeSheet.sheet}
-                  activeIndex={activeIndex}
-                  sheets={sheets}
-                  onPrev={goPrevSheet}
-                  onNext={goNextSheet}
-                  onSelect={setActiveIndex}
-                />
-
-                <MagazineSheet
-                  sheetNumber={activeSheet.sheet}
-                  products={activeSheet.items}
-                  getLabel={getLabel}
-                  revista={revista}
-                />
-
-                <FinalActions
-                  saved={saved}
-                  disabled={products.length === 0 || isSavingPreview}
-                  saving={isSavingPreview}
-                  onSave={savePreview}
-                  onPrint={() => window.print()}
-                />
+                  <div className="grid grid-cols-2 gap-2 sm:min-w-[280px]">
+                    <InfoChip
+                      label="Revista"
+                      value={`#${revista.number}`}
+                      strong
+                    />
+                    <InfoChip label="Hojas" value={String(sheets.length)} />
+                  </div>
+                </div>
               </section>
-            ) : (
-              <div className="rounded-[26px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-6 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
-                <EmptyState
-                  title="Preview vacío"
-                  description="La vista previa aparecerá cuando agregues productos desde la pantalla anterior."
-                />
 
-                <button
-                  type="button"
-                  onClick={goToProducts}
-                  className="tc-primary-button mt-5 w-full"
-                >
-                  Ir a productos
-                </button>
-              </div>
-            )}
-          </section>
+              {saveError ? (
+                <section className="tc-screen-only mt-4 rounded-[18px] border border-[#A52E64]/25 bg-[#A52E64]/10 px-4 py-3 text-[12px] font-black leading-relaxed text-[#A52E64]">
+                  {saveError}
+                </section>
+              ) : null}
+
+              <section className="mt-4 grid gap-4">
+                {activeSheet ? (
+                  <section className="min-w-0">
+                    <SheetControlBar
+                      activeSheet={activeSheet.sheet}
+                      activeIndex={activeIndex}
+                      sheets={sheets}
+                      onPrev={goPrevSheet}
+                      onNext={goNextSheet}
+                      onSelect={setActiveIndex}
+                    />
+
+                    <MagazineSheet
+                      sheetNumber={activeSheet.sheet}
+                      products={activeSheet.items}
+                      getLabel={getLabel}
+                      revista={revista}
+                    />
+
+                    <FinalActions
+                      saved={saved}
+                      disabled={products.length === 0 || isSavingPreview}
+                      saving={isSavingPreview}
+                      onSave={savePreview}
+                      onPrint={() => window.print()}
+                    />
+                  </section>
+                ) : (
+                  <div className="rounded-[26px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-6 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
+                    <EmptyState
+                      title="Preview vacío"
+                      description="La vista previa aparecerá cuando agregues productos desde la pantalla anterior."
+                    />
+
+                    <button
+                      type="button"
+                      onClick={goToProducts}
+                      className="tc-primary-button mt-5 w-full"
+                    >
+                      Ir a productos
+                    </button>
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </motion.section>
 
         <CreatedToast show={showCreatedToast} />
+        <PrintStyles />
 
         <RouteTransitionOverlay
           show={isSavingPreview || isRouteLoading}
@@ -523,6 +577,206 @@ setShowCreatedToast(true);
   );
 }
 
+function PrintStyles() {
+  return (
+    <style jsx global>{`
+      .tc-print-description {
+        display: none;
+      }
+
+      @media print {
+        @page {
+          size: A4;
+          margin: 10mm;
+        }
+
+        html,
+        body {
+          background: #ffffff !important;
+          color: #221d20 !important;
+          overflow: visible !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        .tc-screen-only {
+          display: none !important;
+        }
+
+        .tc-preview-page {
+          min-height: auto !important;
+          background: #ffffff !important;
+          padding: 0 !important;
+          overflow: visible !important;
+        }
+
+        .tc-preview-shell {
+          width: 100% !important;
+          max-width: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+        }
+
+        .tc-preview-shell > section.mt-4.grid {
+          margin-top: 0 !important;
+          display: block !important;
+        }
+
+        .tc-print-sheet {
+          overflow: visible !important;
+          border: 0 !important;
+          border-radius: 0 !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+          break-after: auto;
+        }
+
+        .tc-print-sheet > header {
+          padding: 0 0 8mm 0 !important;
+          border-bottom: 1px solid #c8c0c4 !important;
+          background: #ffffff !important;
+          color: #221d20 !important;
+        }
+
+        .tc-print-sheet > header h2 {
+          font-size: 22px !important;
+          color: #221d20 !important;
+        }
+
+        .tc-print-sheet > header p {
+          color: #6b6267 !important;
+        }
+
+        .tc-print-sheet > header > div:last-child {
+          border-color: #c8c0c4 !important;
+          background: #ffffff !important;
+          color: #221d20 !important;
+        }
+
+        .tc-print-sheet > div.grid {
+          display: block !important;
+          padding: 6mm 0 0 0 !important;
+        }
+
+        .tc-print-group {
+          margin-bottom: 7mm !important;
+          overflow: visible !important;
+          border: 1px solid #c8c0c4 !important;
+          border-radius: 10px !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+
+        .tc-print-group > div:first-child {
+          min-height: 28px !important;
+          padding: 6px 10px !important;
+        }
+
+        .tc-print-group > div.grid {
+          display: grid !important;
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          gap: 6mm !important;
+          padding: 6mm !important;
+        }
+
+        .tc-print-group > div.grid:has(.tc-print-product:only-child) {
+          grid-template-columns: minmax(0, 1fr) !important;
+        }
+
+        .tc-print-product {
+          display: block !important;
+          height: auto !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+          border-radius: 8px !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+
+        .tc-print-product h3 {
+          display: block !important;
+          -webkit-line-clamp: unset !important;
+          overflow: visible !important;
+          font-size: 12px !important;
+          line-height: 1.25 !important;
+        }
+
+        .tc-description-control,
+        .tc-print-product .absolute {
+          display: none !important;
+        }
+
+        .tc-print-description {
+          display: block !important;
+          margin-top: 10px !important;
+          border-top: 1px solid #d4cdd0 !important;
+          padding-top: 8px !important;
+        }
+
+        .tc-print-description-title {
+          margin-bottom: 4px !important;
+          font-size: 9px !important;
+          font-weight: 900 !important;
+          letter-spacing: 0.12em !important;
+          text-transform: uppercase !important;
+          color: #a52e64 !important;
+        }
+
+        .tc-print-description-body {
+          font-size: 10px !important;
+          font-weight: 700 !important;
+          line-height: 1.35 !important;
+          color: #5f565b !important;
+        }
+
+        .tc-print-description-body p {
+          margin: 0 0 2px 0 !important;
+        }
+      }
+    `}</style>
+  );
+}
+
+function AccessStatusPanel({
+  eyebrow,
+  title,
+  description,
+  restricted,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  restricted?: boolean;
+}) {
+  return (
+    <section
+      className={`mt-4 rounded-[22px] border p-5 text-center shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.40)] ${
+        restricted
+          ? "border-[#A52E64]/25 bg-[#A52E64]/10"
+          : "border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)]"
+      }`}
+    >
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+        {eyebrow}
+      </p>
+      <h1 className="mt-2 text-[28px] font-black tracking-[-0.06em] text-[#241f22]">
+        {title}
+      </h1>
+      <p className="mx-auto mt-2 max-w-xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+        {description}
+      </p>
+    </section>
+  );
+}
+
 function CreatedToast({ show }: { show: boolean }) {
   return (
     <AnimatePresence>
@@ -532,7 +786,7 @@ function CreatedToast({ show }: { show: boolean }) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 12, scale: 0.98 }}
           transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed inset-x-3 bottom-5 z-[70] mx-auto flex max-w-[360px] items-center gap-3 rounded-[22px] border border-white/25 bg-[#232124] px-4 py-3 text-[#f4f1f3] shadow-[0_22px_60px_rgba(0,0,0,.45),inset_0_1px_0_rgba(255,255,255,.10)] sm:bottom-7"
+          className="tc-screen-only fixed inset-x-3 bottom-5 z-[70] mx-auto flex max-w-[360px] items-center gap-3 rounded-[22px] border border-white/25 bg-[#232124] px-4 py-3 text-[#f4f1f3] shadow-[0_22px_60px_rgba(0,0,0,.45),inset_0_1px_0_rgba(255,255,255,.10)] sm:bottom-7"
           role="status"
           aria-live="polite"
         >
@@ -555,7 +809,7 @@ function CreatedToast({ show }: { show: boolean }) {
 
 function AppHeader({ progress }: { progress: number }) {
   return (
-    <header className="tc-sheen relative overflow-hidden rounded-[26px] bg-[#232124] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.08)] sm:p-5">
+    <header className="tc-screen-only tc-sheen relative overflow-hidden rounded-[26px] bg-[#232124] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.08)] sm:p-5">
       <div className="relative z-10 grid gap-4 sm:grid-cols-[104px_1fr_auto] sm:items-center">
         <div className="grid h-[88px] w-[88px] place-items-center rounded-[24px] border border-white/25 bg-white p-3 shadow-[0_20px_38px_rgba(0,0,0,.28),inset_0_1px_0_rgba(255,255,255,.65)] sm:h-[104px] sm:w-[104px]">
           <img
@@ -592,7 +846,7 @@ function AppHeader({ progress }: { progress: number }) {
 
 function PreviewRail({ onProductsClick }: { onProductsClick: () => void }) {
   return (
-    <nav className="mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-2">
+    <nav className="tc-screen-only mt-4 grid gap-2 rounded-[21px] border border-[#bdb5b9] bg-[#d8d3d5] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,.55)] md:grid-cols-2">
       <RailItem
         done
         asButton
@@ -702,7 +956,7 @@ function SheetControlBar({
   onSelect: (index: number) => void;
 }) {
   return (
-    <section className="mb-3 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:p-4">
+    <section className="tc-screen-only mb-3 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[15px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
@@ -774,7 +1028,7 @@ function FinalActions({
   onPrint: () => void;
 }) {
   return (
-    <div className="mt-3 grid gap-2 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:grid-cols-2 sm:p-4">
+    <div className="tc-screen-only mt-3 grid gap-2 rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] p-3 shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] sm:grid-cols-2 sm:p-4">
       <button
         type="button"
         onClick={onSave}
@@ -854,7 +1108,7 @@ function MagazineSheet({
       initial={{ opacity: 0, y: 14, scale: 0.99 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-      className="overflow-hidden rounded-[28px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#f0ecee,#e2dddf)] shadow-[0_22px_60px_rgba(0,0,0,.18),inset_0_1px_0_rgba(255,255,255,.62)]"
+      className="tc-print-sheet overflow-hidden rounded-[28px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#f0ecee,#e2dddf)] shadow-[0_22px_60px_rgba(0,0,0,.18),inset_0_1px_0_rgba(255,255,255,.62)]"
     >
       <header className="flex flex-col gap-4 border-b border-[#bdb5b9] bg-[#232124] p-4 text-[#f4f1f3] sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div>
@@ -916,8 +1170,8 @@ function buildProductGroups(products: AddedProduct[]): ProductPreviewGroup[] {
     .map((group) => ({
       ...group,
       products: [...group.products].sort((a, b) => {
-        if (a.column !== b.column) return a.column - b.column;
         if (a.row !== b.row) return a.row - b.row;
+        if (a.column !== b.column) return a.column - b.column;
         return a.name.localeCompare(b.name);
       }),
     }))
@@ -925,12 +1179,12 @@ function buildProductGroups(products: AddedProduct[]): ProductPreviewGroup[] {
       const aFirst = a.products[0];
       const bFirst = b.products[0];
 
-      if ((aFirst?.column ?? 0) !== (bFirst?.column ?? 0)) {
-        return (aFirst?.column ?? 0) - (bFirst?.column ?? 0);
-      }
-
       if ((aFirst?.row ?? 0) !== (bFirst?.row ?? 0)) {
         return (aFirst?.row ?? 0) - (bFirst?.row ?? 0);
+      }
+
+      if ((aFirst?.column ?? 0) !== (bFirst?.column ?? 0)) {
+        return (aFirst?.column ?? 0) - (bFirst?.column ?? 0);
       }
 
       return a.key.localeCompare(b.key);
@@ -938,7 +1192,7 @@ function buildProductGroups(products: AddedProduct[]): ProductPreviewGroup[] {
 }
 
 function getLabelGridClass(productCount: number) {
-  if (productCount <= 1) return "grid-cols-1 sm:grid-cols-[minmax(0,420px)]";
+  if (productCount <= 1) return "grid-cols-1";
   if (productCount === 2) return "grid-cols-1 md:grid-cols-2";
   if (productCount === 3) return "grid-cols-1 md:grid-cols-3";
   return "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4";
@@ -957,7 +1211,7 @@ function ProductPreviewLabelGroup({
   const gridClass = getLabelGridClass(group.products.length);
 
   return (
-    <section className="overflow-hidden rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
+    <section className="tc-print-group overflow-hidden rounded-[22px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)] shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)]">
       <div
         className="flex min-h-11 items-center justify-between gap-3 px-4 py-2.5 text-white"
         style={{ backgroundColor: label?.color ?? "#A52E64" }}
@@ -986,7 +1240,11 @@ function ProductPreviewLabelGroup({
 function ProductPreviewItem({ product }: { product: AddedProduct }) {
   const [descriptionOpen, setDescriptionOpen] = useState(false);
 
-  const description = (product.customDescription || product.description || "").trim();
+  const description = (
+    product.customDescription ||
+    product.description ||
+    ""
+  ).trim();
   const hasDescription = description.length > 0;
   const descriptionLines = description
     .split("\n")
@@ -994,7 +1252,7 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
     .filter(Boolean);
 
   return (
-    <article className="relative grid h-[430px] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[16px] border border-[#c4bcc0] bg-[#f3eff1] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
+    <article className="tc-print-product relative grid h-[430px] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[16px] border border-[#c4bcc0] bg-[#f3eff1] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
       <ProductPreviewImage product={product} />
 
       <div className="min-h-0 pt-3">
@@ -1025,7 +1283,7 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
         </div>
       </div>
 
-      <div className="mt-3 border-t border-[#d4cdd0] pt-3">
+      <div className="tc-description-control mt-3 border-t border-[#d4cdd0] pt-3">
         {hasDescription ? (
           <button
             type="button"
@@ -1033,7 +1291,9 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
             className="flex min-h-10 w-full items-center justify-between gap-3 rounded-[13px] border border-[#c4bcc0] bg-[#ebe7e8] px-3 text-left text-[11px] font-black text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.45)] transition hover:bg-[#A52E64]/10 active:scale-[0.99]"
             aria-expanded={descriptionOpen}
           >
-            <span>{descriptionOpen ? "Ocultar descripción" : "Ver descripción"}</span>
+            <span>
+              {descriptionOpen ? "Ocultar descripción" : "Ver descripción"}
+            </span>
             <ChevronRight
               className={`h-4 w-4 shrink-0 transition ${
                 descriptionOpen ? "rotate-90" : ""
@@ -1046,6 +1306,19 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
           </div>
         )}
       </div>
+
+      {hasDescription ? (
+        <div className="tc-print-description">
+          <div className="tc-print-description-title">Descripción</div>
+          <div className="tc-print-description-body">
+            {descriptionLines.map((line, index) => (
+              <p key={`${product.id}-print-description-line-${index}`}>
+                • {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <AnimatePresence>
         {descriptionOpen && hasDescription ? (
@@ -1071,7 +1344,10 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
 
             <div className="max-h-[146px] overflow-y-auto px-3 py-2 text-[11px] font-bold leading-relaxed text-[#655c61]">
               {descriptionLines.map((line, index) => (
-                <p key={`${product.id}-description-line-${index}`} className="py-0.5">
+                <p
+                  key={`${product.id}-description-line-${index}`}
+                  className="py-0.5"
+                >
                   • {line}
                 </p>
               ))}
@@ -1173,8 +1449,8 @@ function buildRevistaPdfBase64({
 
   const sortedProducts = [...products].sort((a, b) => {
     if (a.sheet !== b.sheet) return a.sheet - b.sheet;
-    if (a.column !== b.column) return a.column - b.column;
     if (a.row !== b.row) return a.row - b.row;
+    if (a.column !== b.column) return a.column - b.column;
     return a.name.localeCompare(b.name);
   });
 
@@ -1281,7 +1557,7 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
 }
-function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk"]) {
+function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk", "v"]) {
   if (typeof window === "undefined") return;
 
   const url = new URL(window.location.href);

@@ -24,6 +24,7 @@ import {
   search_accounts,
   search_contacts,
 } from "@/src/lib/api/flow";
+import { validate_revista_session } from "@/src/lib/api/session";
 
 type ClientType = "contacto" | "empresa" | "";
 type CreateStep = "datos" | "cliente" | "parametros";
@@ -78,7 +79,10 @@ export default function CreatePage() {
   const routeLockRef = useRef(false);
   const router = useRouter();
 
-  const flow = useMemo(() => get_flow_from_url(), []);
+  const [flow, setFlow] = useState("");
+  const [accessStatus, setAccessStatus] = useState<
+    "checking" | "authorized" | "unauthorized"
+  >("checking");
 
   const canCreate = useMemo(
     () =>
@@ -109,6 +113,46 @@ export default function CreatePage() {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function initializeCreateAccess() {
+      const urlFlow = get_flow_from_url();
+      const storedFlow = sessionStorage.getItem("revista_flow") || "";
+      const currentFlow = urlFlow || storedFlow;
+
+      try {
+        if (!currentFlow) {
+          throw new Error("La sesión de acceso no está activa.");
+        }
+
+        await validate_revista_session(currentFlow);
+
+        if (cancelled) return;
+
+        setFlow(currentFlow);
+        setAccessStatus("authorized");
+        sessionStorage.setItem("revista_flow", currentFlow);
+        cleanSensitiveUrlParams();
+      } catch {
+        if (cancelled) return;
+
+        setFlow("");
+        setAccessStatus("unauthorized");
+        sessionStorage.removeItem("revista_flow");
+        cleanSensitiveUrlParams();
+      }
+    }
+
+    void initializeCreateAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (accessStatus !== "authorized") return;
+
     const query = clientQuery.trim();
 
     if (!clientType || selectedClient || query.length < 1) {
@@ -200,7 +244,7 @@ export default function CreatePage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [clientQuery, clientType, selectedClient]);
+  }, [accessStatus, clientQuery, clientType, selectedClient]);
 
   function normalizeMoney(value: string) {
     const clean = value.replace(/\D/g, "").slice(0, 9);
@@ -277,6 +321,7 @@ export default function CreatePage() {
   }
 
   async function handleSaveMagazine() {
+    if (accessStatus !== "authorized" || !flow) return;
     if (!canCreate || saveStatus === "saving" || isRouteLoading) return;
     if (!selectedClient) return;
     if (saveLockRef.current) return;
@@ -299,9 +344,7 @@ export default function CreatePage() {
       setSaveStatus("idle");
 
       alert(
-        error instanceof Error
-          ? error.message
-          : "No se pudo crear la revista.",
+        error instanceof Error ? error.message : "No se pudo crear la revista.",
       );
     }
   }
@@ -362,237 +405,266 @@ export default function CreatePage() {
           className="relative mx-auto w-full max-w-[1180px] rounded-[30px] border border-white/35 bg-[linear-gradient(145deg,#e4dfe1,#d5d0d2_62%,#cbc5c8)] p-3 shadow-[0_34px_90px_rgba(0,0,0,.42),inset_0_1px_0_rgba(255,255,255,.75)] sm:p-5"
         >
           <AppHeader progress={progress} />
-          <ModuleRail activeStep={activeStep} onStepChange={setActiveStep} />
-          <HeroIntro />
 
-          <section className="mt-4 grid gap-4">
-            <div className="min-h-[360px]">
-              <AnimatePresence mode="wait">
-                {activeStep === "datos" ? (
-                  <StepMotion key="datos">
-                    <FormCard
-                      eyebrow="Paso 1"
-                      title="Identificación"
-                      subtitle="Nombre, edición y fecha de publicación"
-                      icon={<FileText />}
-                      badge={`${nombre.length} / ${limits.nombreMax}`}
-                    >
-                      <div className="grid gap-3">
-                        <Field label="Nombre de revista">
-                          <input
-                            value={nombre}
-                            onChange={(event) =>
-                              setNombre(
-                                event.target.value.slice(0, limits.nombreMax),
-                              )
-                            }
-                            maxLength={limits.nombreMax}
-                            placeholder="Nombre de la revista"
-                            className="tc-input text-[15px] font-black tracking-[-0.02em]"
-                          />
-                        </Field>
+          {accessStatus === "checking" ? (
+            <AccessStatusPanel
+              eyebrow="Validando acceso"
+              title="Verificando sesión"
+              description="Esperá un momento mientras verificamos que la sesión siga activa."
+            />
+          ) : accessStatus === "unauthorized" ? (
+            <AccessStatusPanel
+              eyebrow="Acceso restringido"
+              title="Acceso no autorizado"
+              description="Esta pantalla solo puede abrirse desde Zoho Creator con una sesión válida."
+              restricted
+            />
+          ) : (
+            <>
+              <ModuleRail
+                activeStep={activeStep}
+                onStepChange={setActiveStep}
+              />
+              <HeroIntro />
 
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <Field label="Edición">
-                            <input
-                              value={edicion}
-                              onChange={(event) =>
-                                setEdicion(event.target.value)
-                              }
-                              placeholder="Edición"
-                              className="tc-input"
+              <section className="mt-4 grid gap-4">
+                <div className="min-h-[360px]">
+                  <AnimatePresence mode="wait">
+                    {activeStep === "datos" ? (
+                      <StepMotion key="datos">
+                        <FormCard
+                          eyebrow="Paso 1"
+                          title="Identificación"
+                          subtitle="Nombre, edición y fecha de publicación"
+                          icon={<FileText />}
+                          badge={`${nombre.length} / ${limits.nombreMax}`}
+                        >
+                          <div className="grid gap-3">
+                            <Field label="Nombre de revista">
+                              <input
+                                value={nombre}
+                                onChange={(event) =>
+                                  setNombre(
+                                    event.target.value.slice(
+                                      0,
+                                      limits.nombreMax,
+                                    ),
+                                  )
+                                }
+                                maxLength={limits.nombreMax}
+                                placeholder="Nombre de la revista"
+                                className="tc-input text-[15px] font-black tracking-[-0.02em]"
+                              />
+                            </Field>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <Field label="Edición">
+                                <input
+                                  value={edicion}
+                                  onChange={(event) =>
+                                    setEdicion(event.target.value)
+                                  }
+                                  placeholder="Edición"
+                                  className="tc-input"
+                                />
+                              </Field>
+
+                              <Field label="Fecha publicación">
+                                <DatePicker value={fecha} onChange={setFecha} />
+                              </Field>
+                            </div>
+
+                            <Field label="Precio revista / opcional">
+                              <input
+                                value={precio}
+                                onChange={(event) =>
+                                  setPrecio(normalizeMoney(event.target.value))
+                                }
+                                inputMode="numeric"
+                                placeholder="Máximo: 999.999.999"
+                                className="tc-input"
+                              />
+                            </Field>
+
+                            <StepControls
+                              activeStep={activeStep}
+                              onBack={goBack}
+                              onNext={goNext}
                             />
-                          </Field>
+                          </div>
+                        </FormCard>
+                      </StepMotion>
+                    ) : null}
 
-                          <Field label="Fecha publicación">
-                            <DatePicker value={fecha} onChange={setFecha} />
-                          </Field>
-                        </div>
+                    {activeStep === "cliente" ? (
+                      <StepMotion key="cliente">
+                        <FormCard
+                          eyebrow="Paso 2"
+                          title="Cliente"
+                          subtitle="Contacto o empresa asociada"
+                          icon={<Contact />}
+                        >
+                          <div className="grid gap-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <ChoiceButton
+                                active={clientType === "contacto"}
+                                onClick={() => selectClientType("contacto")}
+                                icon={<Contact />}
+                              >
+                                Contacto
+                              </ChoiceButton>
 
-                        <Field label="Precio revista / opcional">
-                          <input
-                            value={precio}
-                            onChange={(event) =>
-                              setPrecio(normalizeMoney(event.target.value))
-                            }
-                            inputMode="numeric"
-                            placeholder="Máximo: 999.999.999"
-                            className="tc-input"
-                          />
-                        </Field>
+                              <ChoiceButton
+                                active={clientType === "empresa"}
+                                onClick={() => selectClientType("empresa")}
+                                icon={<Building2 />}
+                              >
+                                Empresa
+                              </ChoiceButton>
+                            </div>
 
-                        <StepControls
-                          activeStep={activeStep}
-                          onBack={goBack}
-                          onNext={goNext}
-                        />
-                      </div>
-                    </FormCard>
-                  </StepMotion>
-                ) : null}
+                            <Field label="Buscar cliente">
+                              <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8a7f85]" />
 
-                {activeStep === "cliente" ? (
-                  <StepMotion key="cliente">
-                    <FormCard
-                      eyebrow="Paso 2"
-                      title="Cliente"
-                      subtitle="Contacto o empresa asociada"
-                      icon={<Contact />}
-                    >
-                      <div className="grid gap-3">
-                        <div className="grid grid-cols-2 gap-2">
-                          <ChoiceButton
-                            active={clientType === "contacto"}
-                            onClick={() => selectClientType("contacto")}
-                            icon={<Contact />}
-                          >
-                            Contacto
-                          </ChoiceButton>
+                                <input
+                                  disabled={!clientType}
+                                  value={clientQuery}
+                                  onChange={(event) => {
+                                    setClientQuery(event.target.value);
+                                    setSelectedClient(null);
+                                  }}
+                                  placeholder={
+                                    clientType === "contacto"
+                                      ? "Nombre, CI o código..."
+                                      : clientType === "empresa"
+                                        ? "Empresa, RUC o código..."
+                                        : "Seleccioná primero el tipo"
+                                  }
+                                  className="tc-input pl-9 disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                              </div>
+                            </Field>
 
-                          <ChoiceButton
-                            active={clientType === "empresa"}
-                            onClick={() => selectClientType("empresa")}
-                            icon={<Building2 />}
-                          >
-                            Empresa
-                          </ChoiceButton>
-                        </div>
-
-                        <Field label="Buscar cliente">
-                          <div className="relative">
-                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8a7f85]" />
-
-                            <input
-                              disabled={!clientType}
-                              value={clientQuery}
-                              onChange={(event) => {
-                                setClientQuery(event.target.value);
-                                setSelectedClient(null);
+                            <ClientResults
+                              clientType={clientType}
+                              selectedClient={selectedClient}
+                              filteredClients={clientResults}
+                              onSelect={(client) => {
+                                setSelectedClient(client);
+                                setClientQuery(client.name);
+                                setClientSearchError("");
                               }}
-                              placeholder={
-                                clientType === "contacto"
-                                  ? "Nombre, CI o código..."
-                                  : clientType === "empresa"
-                                    ? "Empresa, RUC o código..."
-                                    : "Seleccioná primero el tipo"
-                              }
-                              className="tc-input pl-9 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClear={() => {
+                                setSelectedClient(null);
+                                setClientQuery("");
+                                setClientResults([]);
+                                setClientSearchError("");
+                              }}
+                            />
+
+                            {clientSearchError ? (
+                              <div className="rounded-[14px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
+                                {clientSearchError}
+                              </div>
+                            ) : null}
+
+                            <StepControls
+                              activeStep={activeStep}
+                              onBack={goBack}
+                              onNext={goNext}
                             />
                           </div>
-                        </Field>
+                        </FormCard>
+                      </StepMotion>
+                    ) : null}
 
-                        <ClientResults
-                          clientType={clientType}
-                          selectedClient={selectedClient}
-                          filteredClients={clientResults}
-                          onSelect={(client) => {
-                            setSelectedClient(client);
-                            setClientQuery(client.name);
-                            setClientSearchError("");
-                          }}
-                          onClear={() => {
-                            setSelectedClient(null);
-                            setClientQuery("");
-                            setClientResults([]);
-                            setClientSearchError("");
-                          }}
-                        />
+                    {activeStep === "parametros" ? (
+                      <StepMotion key="parametros">
+                        <FormCard
+                          eyebrow="Paso 3"
+                          title="Parámetros editoriales"
+                          subtitle="Tiradas, hojas, artículos y columnas"
+                          icon={<Settings2 />}
+                        >
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <NumberControl
+                              label="Tiradas"
+                              value={tiradas}
+                              min={1}
+                              max={limits.tiradasMax}
+                              onChange={(value) =>
+                                updateNumber(
+                                  setTiradas,
+                                  value,
+                                  1,
+                                  limits.tiradasMax,
+                                )
+                              }
+                            />
 
-                        {clientSearchError ? (
-                          <div className="rounded-[14px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
-                            {clientSearchError}
+                            <NumberControl
+                              label="Máx. hojas"
+                              value={hojas}
+                              min={1}
+                              max={limits.hojasMax}
+                              onChange={(value) =>
+                                updateNumber(
+                                  setHojas,
+                                  value,
+                                  1,
+                                  limits.hojasMax,
+                                )
+                              }
+                            />
+
+                            <NumberControl
+                              label="Máx. artículos"
+                              value={articulos}
+                              min={1}
+                              max={limits.articulosMax}
+                              onChange={(value) =>
+                                updateNumber(
+                                  setArticulos,
+                                  value,
+                                  1,
+                                  limits.articulosMax,
+                                )
+                              }
+                            />
+
+                            <NumberControl
+                              label="Columnas por hoja"
+                              value={columnas}
+                              min={1}
+                              max={limits.columnasMax}
+                              onChange={(value) =>
+                                updateNumber(
+                                  setColumnas,
+                                  value,
+                                  1,
+                                  limits.columnasMax,
+                                )
+                              }
+                            />
                           </div>
-                        ) : null}
+                        </FormCard>
+                      </StepMotion>
+                    ) : null}
+                  </AnimatePresence>
 
-                        <StepControls
-                          activeStep={activeStep}
-                          onBack={goBack}
-                          onNext={goNext}
-                        />
-                      </div>
-                    </FormCard>
-                  </StepMotion>
-                ) : null}
-
-                {activeStep === "parametros" ? (
-                  <StepMotion key="parametros">
-                    <FormCard
-                      eyebrow="Paso 3"
-                      title="Parámetros editoriales"
-                      subtitle="Tiradas, hojas, artículos y columnas"
-                      icon={<Settings2 />}
-                    >
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <NumberControl
-                          label="Tiradas"
-                          value={tiradas}
-                          min={1}
-                          max={limits.tiradasMax}
-                          onChange={(value) =>
-                            updateNumber(
-                              setTiradas,
-                              value,
-                              1,
-                              limits.tiradasMax,
-                            )
-                          }
-                        />
-
-                        <NumberControl
-                          label="Máx. hojas"
-                          value={hojas}
-                          min={1}
-                          max={limits.hojasMax}
-                          onChange={(value) =>
-                            updateNumber(setHojas, value, 1, limits.hojasMax)
-                          }
-                        />
-
-                        <NumberControl
-                          label="Máx. artículos"
-                          value={articulos}
-                          min={1}
-                          max={limits.articulosMax}
-                          onChange={(value) =>
-                            updateNumber(
-                              setArticulos,
-                              value,
-                              1,
-                              limits.articulosMax,
-                            )
-                          }
-                        />
-
-                        <NumberControl
-                          label="Columnas por hoja"
-                          value={columnas}
-                          min={1}
-                          max={limits.columnasMax}
-                          onChange={(value) =>
-                            updateNumber(
-                              setColumnas,
-                              value,
-                              1,
-                              limits.columnasMax,
-                            )
-                          }
-                        />
-                      </div>
-                    </FormCard>
-                  </StepMotion>
-                ) : null}
-              </AnimatePresence>
-
-              {activeStep === "parametros" ? (
-                <SaveMagazineAction
-                  canCreate={canCreate}
-                  saveStatus={saveStatus}
-                  onBack={goBack}
-                  onSave={handleSaveMagazine}
-                />
-              ) : null}
-            </div>
-          </section>
+                  {activeStep === "parametros" ? (
+                    <SaveMagazineAction
+                      canCreate={canCreate}
+                      saveStatus={saveStatus}
+                      onBack={goBack}
+                      onSave={handleSaveMagazine}
+                    />
+                  ) : null}
+                </div>
+              </section>
+            </>
+          )}
         </motion.section>
 
         <RouteTransitionOverlay
@@ -603,6 +675,63 @@ export default function CreatePage() {
       </main>
     </MotionConfig>
   );
+}
+
+function AccessStatusPanel({
+  eyebrow,
+  title,
+  description,
+  restricted,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  restricted?: boolean;
+}) {
+  return (
+    <section
+      className={`mt-4 rounded-[22px] border p-5 text-center shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.40)] ${
+        restricted
+          ? "border-[#A52E64]/25 bg-[#A52E64]/10"
+          : "border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)]"
+      }`}
+    >
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+        {eyebrow}
+      </p>
+
+      <h1 className="mt-2 text-[28px] font-black tracking-[-0.06em] text-[#241f22]">
+        {title}
+      </h1>
+
+      <p className="mx-auto mt-2 max-w-xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+        {description}
+      </p>
+    </section>
+  );
+}
+
+function cleanSensitiveUrlParams(paramsToRemove = ["flow", "tk", "v"]) {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+
+  for (const param of paramsToRemove) {
+    if (url.searchParams.has(param)) {
+      url.searchParams.delete(param);
+      changed = true;
+    }
+  }
+
+  if (!changed) return;
+
+  const cleanUrl =
+    url.pathname +
+    (url.searchParams.toString() ? `?${url.searchParams.toString()}` : "") +
+    url.hash;
+
+  window.history.replaceState(null, "", cleanUrl);
 }
 
 function AppHeader({ progress }: { progress: number }) {
@@ -931,10 +1060,7 @@ function ClientResults({
                     label="Teléfono"
                     value={client.phone || "—"}
                   />
-                  <ClientInfoPill
-                    label="Email"
-                    value={client.email || "—"}
-                  />
+                  <ClientInfoPill label="Email" value={client.email || "—"} />
                 </div>
               </button>
             ))

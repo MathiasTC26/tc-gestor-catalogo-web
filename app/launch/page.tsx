@@ -119,10 +119,23 @@ function getFallbackNext(target: LaunchTarget): string {
   return "/";
 }
 
+function buildRedirectUrl(nextUrl: string, flow: string) {
+  const cleanFlow = flow.trim();
+
+  if (!cleanFlow) {
+    return nextUrl;
+  }
+
+  const separator = nextUrl.includes("?") ? "&" : "?";
+
+  return `${nextUrl}${separator}flow=${encodeURIComponent(cleanFlow)}`;
+}
+
 function LaunchContent() {
   const params = useSearchParams();
 
   const target = normalizeTarget(params.get("target"));
+  const flow = params.get("flow")?.trim() || "";
   const nextUrl = getSafeNext(params.get("next")) ?? getFallbackNext(target);
 
   const copy = launchCopy[target];
@@ -157,7 +170,11 @@ function LaunchContent() {
       }
 
       window.setTimeout(() => {
-        window.location.href = nextUrl;
+        if (flow) {
+          sessionStorage.setItem("revista_flow", flow);
+        }
+
+        window.location.href = buildRedirectUrl(nextUrl, flow);
       }, 220);
     }
 
@@ -166,7 +183,7 @@ function LaunchContent() {
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [copy.statusText, nextUrl]);
+  }, [copy.statusText, nextUrl, flow]);
 
   const progressStyle = useMemo(
     () => ({

@@ -6,13 +6,53 @@ import {
   FilePenLine,
   FilePlus2,
   LockKeyhole,
+  ShieldAlert,
   Sparkles,
 } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { get_flow_from_url } from "@/src/lib/api/flow";
+import { validate_revista_session } from "@/src/lib/api/session";
+
+type AccessStatus = "checking" | "authorized" | "unauthorized";
 
 export default function HomePage() {
+  const [accessStatus, setAccessStatus] =
+    useState<AccessStatus>("checking");
+
   useEffect(() => {
-    cleanSensitiveUrlParams();
+    let cancelled = false;
+
+    async function initializeAccess() {
+      const urlFlow = get_flow_from_url();
+      const storedFlow = sessionStorage.getItem("revista_flow") || "";
+      const currentFlow = urlFlow || storedFlow;
+
+      try {
+        if (!currentFlow) {
+          throw new Error("La sesión de acceso no está activa.");
+        }
+
+        await validate_revista_session(currentFlow);
+
+        if (cancelled) return;
+
+        sessionStorage.setItem("revista_flow", currentFlow);
+        setAccessStatus("authorized");
+        cleanSensitiveUrlParams();
+      } catch {
+        if (cancelled) return;
+
+        sessionStorage.removeItem("revista_flow");
+        setAccessStatus("unauthorized");
+        cleanSensitiveUrlParams();
+      }
+    }
+
+    void initializeAccess();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -39,45 +79,105 @@ export default function HomePage() {
               </h1>
               <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#f4f1f3]/68 sm:text-[15px]">
                 Elegí el área de trabajo y ejecutá la acción correspondiente
-                desde el nuevo flujo web.
+                desde el flujo autorizado.
               </p>
             </div>
           </div>
         </header>
 
-        <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
-            Revista
-          </p>
-          <h2 className="mt-1 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
-            Acciones disponibles
-          </h2>
-          <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
-            Seleccioná una opción para comenzar a gestionar la revista sin
-            depender del flujo viejo de Creator.
-          </p>
-        </section>
-
-        <section className="mt-4 grid gap-4 lg:grid-cols-2">
-          <ActionCard
-            href="/create"
-            label="Principal"
-            title="Crear revista"
-            description="Registrá una revista nueva, configurá sus datos principales y preparala para añadir productos."
-            access="Nueva publicación"
-            icon={<FilePlus2 />}
+        {accessStatus === "checking" ? (
+          <AccessPanel
+            icon={<LockKeyhole />}
+            eyebrow="Validando acceso"
+            title="Verificando sesión"
+            description="Esperá un momento. Estamos comprobando si la base fue abierta desde Zoho Creator."
           />
-          <ActionCard
-  href="https://tc-gestor-revista-api.todocostura.workers.dev/api/revista/session/create?action=editar"
-  label="Gestión"
-  title="Editar revista"
-  description="Actualizá datos, configuraciones y detalles de una revista existente dentro del nuevo sistema web."
-  access="Publicación existente"
-  icon={<FilePenLine />}
-/>
-        </section>
+        ) : accessStatus === "unauthorized" ? (
+          <AccessPanel
+            icon={<ShieldAlert />}
+            eyebrow="Acceso restringido"
+            title="Acceso no autorizado"
+            description="Esta base solo puede utilizarse cuando se abre desde Zoho Creator. Cerrá esta pestaña e ingresá nuevamente desde Creator."
+            danger
+          />
+        ) : (
+          <>
+            <section className="mt-4 rounded-[25px] border border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.52)] sm:p-5">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+                Revista
+              </p>
+              <h2 className="mt-1 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
+                Acciones disponibles
+              </h2>
+              <p className="mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+                Seleccioná una opción para comenzar a gestionar la revista.
+                Esta base conserva la sesión validada desde Zoho Creator.
+              </p>
+            </section>
+
+            <section className="mt-4 grid gap-4 lg:grid-cols-2">
+              <ActionCard
+                href="/create"
+                label="Principal"
+                title="Crear revista"
+                description="Registrá una revista nueva, configurá sus datos principales y preparala para añadir productos."
+                access="Nueva publicación"
+                icon={<FilePlus2 />}
+              />
+
+              <ActionCard
+                href="/edit"
+                label="Gestión"
+                title="Editar revista"
+                description="Actualizá datos, configuraciones y detalles de una revista existente dentro del nuevo sistema web."
+                access="Publicación existente"
+                icon={<FilePenLine />}
+              />
+            </section>
+          </>
+        )}
       </section>
     </main>
+  );
+}
+
+function AccessPanel({
+  icon,
+  eyebrow,
+  title,
+  description,
+  danger,
+}: {
+  icon: ReactNode;
+  eyebrow: string;
+  title: string;
+  description: string;
+  danger?: boolean;
+}) {
+  return (
+    <section
+      className={`mt-4 rounded-[25px] border p-5 text-center shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.54)] ${
+        danger
+          ? "border-[#A52E64]/25 bg-[#A52E64]/10"
+          : "border-[#bdb5b9] bg-[linear-gradient(180deg,#e9e4e6,#ded9db)]"
+      }`}
+    >
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-[18px] border border-[#bdb5b9] bg-[#e8e3e5] text-[#A52E64] shadow-[inset_0_1px_0_rgba(255,255,255,.55)] [&_svg]:h-6 [&_svg]:w-6">
+        {icon}
+      </div>
+
+      <p className="mt-4 text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+        {eyebrow}
+      </p>
+
+      <h2 className="mt-2 text-[32px] font-black leading-[0.95] tracking-[-0.065em] text-[#241f22] sm:text-[44px]">
+        {title}
+      </h2>
+
+      <p className="mx-auto mt-3 max-w-2xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+        {description}
+      </p>
+    </section>
   );
 }
 
@@ -115,6 +215,7 @@ function ActionCard({
       </div>
 
       <div className="mt-4 h-[3px] w-12 rounded-full bg-[#A52E64]" />
+
       <p className="mt-4 min-h-[54px] text-[13px] font-bold leading-relaxed text-[#655c61]">
         {description}
       </p>

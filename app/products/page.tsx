@@ -22,6 +22,7 @@ import {
   get_flow_from_url,
   search_products,
 } from "@/src/lib/api/flow";
+import { validate_revista_session } from "@/src/lib/api/session";
 
 type ProductLabel = {
   id: string;
@@ -122,74 +123,102 @@ export default function ProductsPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [isRouteLoading, setIsRouteLoading] = useState(false);
+  const [accessStatus, setAccessStatus] = useState<
+    "checking" | "authorized" | "unauthorized"
+  >("checking");
 
   const routeLockRef = useRef(false);
   const hasHydratedStorageRef = useRef(false);
 
   useEffect(() => {
-    const currentFlow =
-      get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
+    let cancelled = false;
 
-    setFlow(currentFlow);
+    async function initializeProductsAccess() {
+      const currentFlow =
+        get_flow_from_url() || sessionStorage.getItem("revista_flow") || "";
 
-    if (currentFlow) {
-      sessionStorage.setItem("revista_flow", currentFlow);
-    }
-
-    cleanSensitiveUrlParams();
-
-    const storedMeta = sessionStorage.getItem("revista_preview_meta");
-    const storedLabels = sessionStorage.getItem("revista_labels");
-    const storedProducts = sessionStorage.getItem("revista_productos");
-
-    if (storedMeta) {
       try {
-        const parsed = JSON.parse(storedMeta) as Partial<RevistaMeta>;
-
-        setRevista({
-          number: Number(parsed.number) || emptyRevista.number,
-          title: parsed.title?.trim() || emptyRevista.title,
-          client: parsed.client?.trim() || emptyRevista.client,
-          maxSheets: clampLimit(parsed.maxSheets, 1, 50, emptyRevista.maxSheets),
-          maxColumns: clampLimit(parsed.maxColumns, 1, 4, emptyRevista.maxColumns),
-          maxArticles: clampLimit(parsed.maxArticles, 1, 150, emptyRevista.maxArticles),
-          tipoClientePrecio: parsed.tipoClientePrecio?.trim() || "",
-          recordId: parsed.recordId?.trim() || "",
-        });
-      } catch {
-        setRevista(emptyRevista);
-      }
-    }
-
-    try {
-      const parsedLabels = storedLabels ? JSON.parse(storedLabels) : [];
-
-      if (Array.isArray(parsedLabels)) {
-        const normalizedLabels = parsedLabels.filter(isValidProductLabel) as ProductLabel[];
-        setLabels(normalizedLabels);
-
-        if (normalizedLabels[0]) {
-          setActiveLabelId(normalizedLabels[0].id);
+        if (!currentFlow) {
+          throw new Error("La sesión de acceso no está activa.");
         }
+
+        await validate_revista_session(currentFlow);
+
+        if (cancelled) return;
+
+        setFlow(currentFlow);
+        setAccessStatus("authorized");
+        sessionStorage.setItem("revista_flow", currentFlow);
+        cleanSensitiveUrlParams();
+
+        const storedMeta = sessionStorage.getItem("revista_preview_meta");
+        const storedLabels = sessionStorage.getItem("revista_labels");
+        const storedProducts = sessionStorage.getItem("revista_productos");
+
+        if (storedMeta) {
+          try {
+            const parsed = JSON.parse(storedMeta) as Partial<RevistaMeta>;
+
+            setRevista({
+              number: Number(parsed.number) || emptyRevista.number,
+              title: parsed.title?.trim() || emptyRevista.title,
+              client: parsed.client?.trim() || emptyRevista.client,
+              maxSheets: clampLimit(parsed.maxSheets, 1, 50, emptyRevista.maxSheets),
+              maxColumns: clampLimit(parsed.maxColumns, 1, 4, emptyRevista.maxColumns),
+              maxArticles: clampLimit(parsed.maxArticles, 1, 150, emptyRevista.maxArticles),
+              tipoClientePrecio: parsed.tipoClientePrecio?.trim() || "",
+              recordId: parsed.recordId?.trim() || "",
+            });
+          } catch {
+            setRevista(emptyRevista);
+          }
+        }
+
+        try {
+          const parsedLabels = storedLabels ? JSON.parse(storedLabels) : [];
+
+          if (Array.isArray(parsedLabels)) {
+            const normalizedLabels = parsedLabels.filter(isValidProductLabel) as ProductLabel[];
+            setLabels(normalizedLabels);
+
+            if (normalizedLabels[0]) {
+              setActiveLabelId(normalizedLabels[0].id);
+            }
+          }
+        } catch {
+          setLabels([]);
+          setActiveLabelId("");
+        }
+
+        try {
+          const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
+
+          if (Array.isArray(parsedProducts)) {
+            setAddedProducts(
+              parsedProducts.filter(isValidAddedProduct) as AddedProduct[],
+            );
+          }
+        } catch {
+          setAddedProducts([]);
+        }
+
+        hasHydratedStorageRef.current = true;
+      } catch {
+        if (cancelled) return;
+
+        setFlow("");
+        setAccessStatus("unauthorized");
+        sessionStorage.removeItem("revista_flow");
+        cleanSensitiveUrlParams();
+        hasHydratedStorageRef.current = true;
       }
-    } catch {
-      setLabels([]);
-      setActiveLabelId("");
     }
 
-    try {
-      const parsedProducts = storedProducts ? JSON.parse(storedProducts) : [];
+    void initializeProductsAccess();
 
-      if (Array.isArray(parsedProducts)) {
-        setAddedProducts(
-          parsedProducts.filter(isValidAddedProduct) as AddedProduct[],
-        );
-      }
-    } catch {
-      setAddedProducts([]);
-    }
-
-    hasHydratedStorageRef.current = true;
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -205,6 +234,8 @@ export default function ProductsPage() {
   }, [addedProducts]);
 
   useEffect(() => {
+    if (accessStatus !== "authorized") return;
+
     const cleanQuery = query.trim();
 
     if (selectedProduct) return;
@@ -260,6 +291,7 @@ export default function ProductsPage() {
       window.clearTimeout(timeoutId);
     };
   }, [
+    accessStatus,
     addedProducts,
     flow,
     query,
@@ -284,9 +316,9 @@ export default function ProductsPage() {
       .sort(([a], [b]) => a - b)
       .map(([sheetNumber, products]) => ({
         sheetNumber,
-        products: products.sort((a, b) => {
-          if (a.column !== b.column) return a.column - b.column;
-          return a.row - b.row;
+        products: [...products].sort((a, b) => {
+          if (a.row !== b.row) return a.row - b.row;
+          return a.column - b.column;
         }),
       }));
   }, [addedProducts]);
@@ -316,7 +348,6 @@ export default function ProductsPage() {
 
     setLabels((current) => [...current, nextLabel]);
     setActiveLabelId(nextLabel.id);
-    applyLabelToGroup(sheet, column, nextLabel.id);
     setLabelTitle("");
   }
 
@@ -380,14 +411,12 @@ export default function ProductsPage() {
 
     if (positionTaken) return null;
 
-    const groupLabelId = getGroupLabelId(parsedSheet, parsedColumn);
-
     return {
       ...selectedProduct,
       sheet: parsedSheet,
       column: parsedColumn,
       row: parsedRow,
-      labelId: groupLabelId || activeLabelId,
+      labelId: activeLabelId,
       customDescription: description.trim(),
     };
   }
@@ -411,42 +440,24 @@ export default function ProductsPage() {
     setAddedProducts((current) => current.filter((product) => product.id !== id));
   }
 
-  function getGroupLabelId(sheetValue: string | number, columnValue: string | number) {
+  function getGroupLabelId(sheetValue: string | number, rowValue: string | number) {
     const parsedSheet = Number(sheetValue);
-    const parsedColumn = Number(columnValue);
+    const parsedRow = Number(rowValue);
 
-    if (!parsedSheet || !parsedColumn) return "";
+    if (!parsedSheet || !parsedRow) return "";
 
     const groupProduct = addedProducts.find((product) => {
-      return product.sheet === parsedSheet && product.column === parsedColumn;
+      return product.sheet === parsedSheet && product.row === parsedRow;
     });
 
     return groupProduct?.labelId ?? "";
   }
 
-  function applyLabelToGroup(
-    sheetValue: string | number,
-    columnValue: string | number,
-    labelId: string,
-  ) {
-    const parsedSheet = Number(sheetValue);
-    const parsedColumn = Number(columnValue);
-
-    if (!parsedSheet || !parsedColumn || !labelId) return;
-
-    setAddedProducts((current) =>
-      current.map((product) =>
-        product.sheet === parsedSheet && product.column === parsedColumn
-          ? { ...product, labelId }
-          : product,
-      ),
-    );
-  }
 
   function handleSheetChange(value: string) {
     setSheet(value);
 
-    const groupLabelId = getGroupLabelId(value, column);
+    const groupLabelId = getGroupLabelId(value, row);
     if (groupLabelId) {
       setActiveLabelId(groupLabelId);
     }
@@ -454,6 +465,15 @@ export default function ProductsPage() {
 
   function handleColumnChange(value: string) {
     setColumn(value);
+
+    const groupLabelId = getGroupLabelId(sheet, row);
+    if (groupLabelId) {
+      setActiveLabelId(groupLabelId);
+    }
+  }
+
+  function handleRowChange(value: string) {
+    setRow(value);
 
     const groupLabelId = getGroupLabelId(sheet, value);
     if (groupLabelId) {
@@ -463,7 +483,6 @@ export default function ProductsPage() {
 
   function handleLabelChange(labelId: string) {
     setActiveLabelId(labelId);
-    applyLabelToGroup(sheet, column, labelId);
   }
 
   function getLabel(labelId: string) {
@@ -471,6 +490,7 @@ export default function ProductsPage() {
   }
 
   function goToPreview() {
+  if (accessStatus !== "authorized" || !flow) return;
   if (addedProducts.length === 0 || isRouteLoading || routeLockRef.current) return;
 
   routeLockRef.current = true;
@@ -510,6 +530,21 @@ export default function ProductsPage() {
         >
           <AppHeader progress={progress} />
 
+          {accessStatus === "checking" ? (
+            <AccessStatusPanel
+              eyebrow="Validando acceso"
+              title="Verificando sesión"
+              description="Esperá un momento mientras verificamos que la sesión siga activa."
+            />
+          ) : accessStatus === "unauthorized" ? (
+            <AccessStatusPanel
+              eyebrow="Acceso restringido"
+              title="Acceso no autorizado"
+              description="Esta pantalla solo puede abrirse desde Zoho Creator con una sesión válida."
+              restricted
+            />
+          ) : (
+            <>
           <ProductRail />
 
           <Intro addedProducts={addedProducts.length} revista={revista} />
@@ -681,7 +716,7 @@ export default function ProductsPage() {
                       activeLabelId={activeLabelId}
                       onSheetChange={handleSheetChange}
                       onColumnChange={handleColumnChange}
-                      onRowChange={setRow}
+                      onRowChange={handleRowChange}
                       onDescriptionChange={setDescription}
                       onLabelChange={handleLabelChange}
                       onClear={clearSelection}
@@ -698,7 +733,7 @@ export default function ProductsPage() {
               <FormCard
   eyebrow="Lista"
   title="Productos agregados"
-  subtitle="Organizados por hoja, columna, fila y etiqueta"
+  subtitle="Organizados por hoja, fila, columna y etiqueta"
   icon={<Layers3 />}
 >
                 <div className="grid gap-4">
@@ -745,6 +780,8 @@ export default function ProductsPage() {
               </FormCard>
             </div>
           </section>
+            </>
+          )}
         </motion.section>
 
         <PreviewModal
@@ -761,6 +798,38 @@ export default function ProductsPage() {
         />
       </main>
     </MotionConfig>
+  );
+}
+
+function AccessStatusPanel({
+  eyebrow,
+  title,
+  description,
+  restricted,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  restricted?: boolean;
+}) {
+  return (
+    <section
+      className={`mt-4 rounded-[22px] border p-5 text-center shadow-[0_14px_34px_rgba(0,0,0,.10),inset_0_1px_0_rgba(255,255,255,.40)] ${
+        restricted
+          ? "border-[#A52E64]/25 bg-[#A52E64]/10"
+          : "border-[#bdb5b9] bg-[linear-gradient(180deg,#ebe7e8,#ded9db)]"
+      }`}
+    >
+      <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#A52E64]">
+        {eyebrow}
+      </p>
+      <h1 className="mt-2 text-[28px] font-black tracking-[-0.06em] text-[#241f22]">
+        {title}
+      </h1>
+      <p className="mx-auto mt-2 max-w-xl text-[13px] font-bold leading-relaxed text-[#655c61]">
+        {description}
+      </p>
+    </section>
   );
 }
 
