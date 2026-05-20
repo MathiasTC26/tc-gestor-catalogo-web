@@ -30,6 +30,12 @@ type ProductLabel = {
   color: string;
 };
 
+type RelatedProduct = {
+  id: string;
+  code: string;
+  name: string;
+};
+
 type ProductRecord = {
   id: string;
   name: string;
@@ -42,6 +48,8 @@ type ProductRecord = {
   priceBookName: string;
   description: string;
   coverUrl: string;
+  relatedProducts: RelatedProduct[];
+  relatedProductsComment: string;
 };
 
 type AddedProduct = ProductRecord & {
@@ -61,6 +69,13 @@ type RevistaMeta = {
   maxArticles: number;
   tipoClientePrecio?: string;
   recordId?: string;
+  showPricesInPreview?: boolean;
+};
+
+type ApiProductChild = {
+  id?: string;
+  codigo?: string;
+  nombre?: string;
 };
 
 type ApiProductRecord = {
@@ -75,6 +90,8 @@ type ApiProductRecord = {
   precioNumero?: number;
   precioFormateado?: string;
   priceBookName?: string;
+  componentes?: ApiProductChild[];
+  comentarioComponentes?: string;
 };
 
 const labelColors = [
@@ -97,6 +114,7 @@ const emptyRevista: RevistaMeta = {
   maxSheets: 1,
   maxColumns: 1,
   maxArticles: 1,
+  showPricesInPreview: true,
 };
 
 export default function ProductsPage() {
@@ -104,6 +122,7 @@ export default function ProductsPage() {
 
   const [flow, setFlow] = useState("");
   const [revista, setRevista] = useState<RevistaMeta>(emptyRevista);
+  const [showPricesInPreview, setShowPricesInPreview] = useState(true);
 
   const [labels, setLabels] = useState<ProductLabel[]>([]);
   const [labelTitle, setLabelTitle] = useState("");
@@ -168,9 +187,20 @@ export default function ProductsPage() {
               maxArticles: clampLimit(parsed.maxArticles, 1, 150, emptyRevista.maxArticles),
               tipoClientePrecio: parsed.tipoClientePrecio?.trim() || "",
               recordId: parsed.recordId?.trim() || "",
+              showPricesInPreview:
+                typeof parsed.showPricesInPreview === "boolean"
+                  ? parsed.showPricesInPreview
+                  : true,
             });
+
+            setShowPricesInPreview(
+              typeof parsed.showPricesInPreview === "boolean"
+                ? parsed.showPricesInPreview
+                : true,
+            );
           } catch {
             setRevista(emptyRevista);
+            setShowPricesInPreview(true);
           }
         }
 
@@ -497,7 +527,13 @@ export default function ProductsPage() {
 
   sessionStorage.setItem("revista_labels", JSON.stringify(labels));
   sessionStorage.setItem("revista_productos", JSON.stringify(addedProducts));
-  sessionStorage.setItem("revista_preview_meta", JSON.stringify(revista));
+  sessionStorage.setItem(
+    "revista_preview_meta",
+    JSON.stringify({
+      ...revista,
+      showPricesInPreview,
+    }),
+  );
 
   if (flow) {
     sessionStorage.setItem("revista_flow", flow);
@@ -750,7 +786,7 @@ export default function ProductsPage() {
 </span>
                           </div>
 
-                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          <div className="grid gap-3">
                             {group.products.map((product) => (
                               <MiniProductCard
                                 key={product.id}
@@ -766,6 +802,24 @@ export default function ProductsPage() {
                   ) : (
                     <EmptyProducts />
                   )}
+
+                  <label className="flex cursor-pointer items-center justify-between gap-3 rounded-[16px] border border-[#c4bcc0] bg-[#e9e4e6] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,.45)]">
+                    <span className="min-w-0">
+                      <span className="block text-[11px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+                        Preview
+                      </span>
+                      <span className="mt-0.5 block text-[12px] font-bold text-[#655c61]">
+                        Mostrar precios en la vista previa final
+                      </span>
+                    </span>
+
+                    <input
+                      type="checkbox"
+                      checked={showPricesInPreview}
+                      onChange={(event) => setShowPricesInPreview(event.target.checked)}
+                      className="h-5 w-5 shrink-0 accent-[#A52E64]"
+                    />
+                  </label>
 
                   <button
                     type="button"
@@ -1076,8 +1130,9 @@ function SelectedProductCard({
             {product.name}
           </h4>
           <p className="mt-1 text-[11px] font-bold text-[#655c61]">
-            {product.code} · {product.category} · {product.price}
+            {product.code} · {product.category} · Precio: {product.price}
           </p>
+          <RelatedProductsBlock product={product} />
         </div>
 
         <button
@@ -1245,6 +1300,8 @@ function MiniProductCard({
   label?: ProductLabel;
   onRemove: () => void;
 }) {
+  const visiblePrice = product.price?.trim() || formatGs(product.priceNumber) || "Gs. 0";
+
   return (
     <article className="overflow-hidden rounded-[16px] border border-[#bdb5b9] bg-[#e9e4e6] shadow-[inset_0_1px_0_rgba(255,255,255,.45)]">
       <div
@@ -1260,37 +1317,96 @@ function MiniProductCard({
         </span>
       </div>
 
-      <div className="flex gap-3 p-3">
-        <ProductThumb product={product} small />
+      <div className="grid gap-2 p-3">
+        <div className="flex gap-3">
+          <ProductThumb product={product} small />
 
-        <div className="min-w-0 flex-1">
-          <h4 className="truncate text-[12.5px] font-black text-[#241f22]">
-            {product.name}
-          </h4>
+          <div className="min-w-0 flex-1">
+            <h4 className="truncate text-[12.5px] font-black text-[#241f22]">
+              {product.name}
+            </h4>
 
-          <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
-            Código: {product.code} · Etiqueta: {label?.title ?? "Sin etiqueta"}
+            <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
+              Código: {product.code} · Etiqueta: {label?.title ?? "Sin etiqueta"}
+            </p>
+
+            <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
+              Hoja {product.sheet} · Columna {product.column} · Fila {product.row}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onRemove}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[#756b70] transition hover:bg-[#A52E64]/10 hover:text-[#A52E64] active:scale-95"
+            aria-label={`Eliminar ${product.name}`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="rounded-[12px] border border-[#A52E64]/20 bg-[#A52E64]/10 px-2.5 py-2">
+          <p className="text-[9px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+            Precio
           </p>
-
-          <p className="mt-1 text-[10.5px] font-bold text-[#756b70]">
-            Hoja {product.sheet} · Columna {product.column} · Fila {product.row}
-          </p>
-
-          <p className="mt-2 line-clamp-2 text-[10.5px] font-semibold leading-relaxed text-[#756b70]">
-            {product.customDescription || "Sin descripción."}
+          <p className="mt-0.5 text-[13px] font-black text-[#241f22]">
+            ₲ {visiblePrice.replace(/^Gs\.\s*/i, "")}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onRemove}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[#756b70] transition hover:bg-[#A52E64]/10 hover:text-[#A52E64] active:scale-95"
-          aria-label={`Eliminar ${product.name}`}
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <RelatedProductsBlock product={product} />
+
+        <p className="line-clamp-2 text-[10.5px] font-semibold leading-relaxed text-[#756b70]">
+          {product.customDescription || "Sin descripción."}
+        </p>
       </div>
     </article>
+  );
+}
+
+function RelatedProductsBlock({
+  product,
+  compact,
+}: {
+  product: ProductRecord;
+  compact?: boolean;
+}) {
+  const relatedProducts = Array.isArray(product.relatedProducts)
+    ? product.relatedProducts
+    : [];
+
+  const fallbackComment = product.relatedProductsComment?.trim() || "";
+
+  if (relatedProducts.length === 0 && !fallbackComment) {
+    return null;
+  }
+
+  const visibleItems = relatedProducts;
+
+  return (
+    <div
+      className={`mt-2 rounded-[12px] border border-[#A52E64]/15 bg-[#A52E64]/5 px-2.5 py-2 ${
+        compact ? "max-w-full" : ""
+      }`}
+    >
+      <p className="text-[9px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+        Componentes
+      </p>
+
+      {visibleItems.length > 0 ? (
+        <ul className="mt-1 grid max-h-[96px] gap-0.5 overflow-y-auto pr-1 text-[10px] font-bold leading-snug text-[#655c61]">
+          {visibleItems.map((item) => (
+            <li key={item.id} className="break-words">
+              {item.code ? `${item.code} - ${item.name}` : item.name}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 max-h-[96px] overflow-y-auto pr-1 text-[10px] font-bold leading-snug text-[#655c61]">
+          {fallbackComment.replace(/^Componentes:\s*/i, "")}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1353,8 +1469,9 @@ function PreviewModal({
                     {product.name}
                   </h4>
                   <p className="mt-1 text-[12px] font-bold text-[#756b70]">
-                    {product.code} · {product.category} · {product.price}
+                    {product.code} · {product.category} · Precio: {product.price}
                   </p>
+                  <RelatedProductsBlock product={product} />
                   <p className="mt-3 text-[12.5px] font-semibold leading-relaxed text-[#5f555a]">
                     {product.customDescription || "Sin descripción."}
                   </p>
@@ -1506,7 +1623,42 @@ function normalizeApiProduct(product: ApiProductRecord): ProductRecord | null {
     priceBookName: product.priceBookName?.trim() || "",
     description: product.descripcion?.trim() || "",
     coverUrl: normalizeCoverUrl(product.portadaUrl),
+    relatedProducts: normalizeRelatedProducts(product.componentes),
+    relatedProductsComment: product.comentarioComponentes?.trim() || "",
   };
+}
+
+function normalizeRelatedProducts(value: unknown): RelatedProduct[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const out: RelatedProduct[] = [];
+
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+
+    const item = raw as ApiProductChild;
+    const id = item.id?.trim() || "";
+    const name = item.nombre?.trim() || "";
+    const code = item.codigo?.trim() || "";
+
+    if (!id || !name) {
+      continue;
+    }
+
+    if (seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    out.push({ id, name, code });
+  }
+
+  return out;
 }
 
 function normalizeCoverUrl(value: unknown) {

@@ -23,6 +23,12 @@ type ProductLabel = {
   color: string;
 };
 
+type RelatedProduct = {
+  id: string;
+  code: string;
+  name: string;
+};
+
 type AddedProduct = {
   id: string;
   name: string;
@@ -36,6 +42,8 @@ type AddedProduct = {
   image?: string;
   coverUrl?: string;
   description: string;
+  relatedProducts?: RelatedProduct[];
+  relatedProductsComment?: string;
   sheet: number;
   column: number;
   row: number;
@@ -52,6 +60,7 @@ type RevistaMeta = {
   maxArticles: number;
   tipoClientePrecio?: string;
   recordId?: string;
+  showPricesInPreview?: boolean;
 };
 
 const fallbackRevista: RevistaMeta = {
@@ -61,6 +70,7 @@ const fallbackRevista: RevistaMeta = {
   maxSheets: 1,
   maxColumns: 1,
   maxArticles: 1,
+  showPricesInPreview: true,
 };
 function getApiBaseUrl() {
   return (
@@ -127,6 +137,10 @@ function buildRevistaFromSavedSnapshot(
     tipoClientePrecio: toText(
       fields.tipo_cliente_precio ?? metadata.tipo_cliente_precio,
     ),
+    showPricesInPreview:
+      typeof metadata.showPricesInPreview === "boolean"
+        ? metadata.showPricesInPreview
+        : metadata.show_prices_in_preview !== false,
   };
 }
 export default function PreviewPage() {
@@ -312,6 +326,8 @@ export default function PreviewPage() {
     return () => window.clearTimeout(timeout);
   }, [showCreatedToast]);
 
+  const showPricesInPreview = revista.showPricesInPreview !== false;
+
   const activeSheet = sheets[activeIndex] ?? null;
   const progress = Math.round(
     (products.length / Math.max(revista.maxArticles, 1)) * 100,
@@ -403,6 +419,8 @@ export default function PreviewPage() {
               max_columnas: revista.maxColumns,
               max_articulos: revista.maxArticles,
               tipo_cliente_precio: revista.tipoClientePrecio,
+              show_prices_in_preview: revista.showPricesInPreview !== false,
+              showPricesInPreview: revista.showPricesInPreview !== false,
             },
           }),
         },
@@ -529,6 +547,7 @@ export default function PreviewPage() {
                       products={activeSheet.items}
                       getLabel={getLabel}
                       revista={revista}
+                      showPricesInPreview={showPricesInPreview}
                     />
 
                     <FinalActions
@@ -1094,11 +1113,13 @@ function MagazineSheet({
   products,
   getLabel,
   revista,
+  showPricesInPreview,
 }: {
   sheetNumber: number;
   products: AddedProduct[];
   getLabel: (labelId: string) => ProductLabel | undefined;
   revista: RevistaMeta;
+  showPricesInPreview: boolean;
 }) {
   const groups = buildProductGroups(products);
 
@@ -1140,6 +1161,7 @@ function MagazineSheet({
             key={group.key}
             group={group}
             label={getLabel(group.labelId)}
+            showPricesInPreview={showPricesInPreview}
           />
         ))}
       </div>
@@ -1201,9 +1223,11 @@ function getLabelGridClass(productCount: number) {
 function ProductPreviewLabelGroup({
   group,
   label,
+  showPricesInPreview,
 }: {
   group: ProductPreviewGroup;
   label?: ProductLabel;
+  showPricesInPreview: boolean;
 }) {
   const firstProduct = group.products[0];
   const groupTitle =
@@ -1230,6 +1254,7 @@ function ProductPreviewLabelGroup({
           <ProductPreviewItem
             key={`${product.id}-${product.sheet}-${product.column}-${product.row}`}
             product={product}
+            showPricesInPreview={showPricesInPreview}
           />
         ))}
       </div>
@@ -1237,7 +1262,13 @@ function ProductPreviewLabelGroup({
   );
 }
 
-function ProductPreviewItem({ product }: { product: AddedProduct }) {
+function ProductPreviewItem({
+  product,
+  showPricesInPreview,
+}: {
+  product: AddedProduct;
+  showPricesInPreview: boolean;
+}) {
   const [descriptionOpen, setDescriptionOpen] = useState(false);
 
   const description = (
@@ -1250,9 +1281,13 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  const relatedProducts = Array.isArray(product.relatedProducts)
+    ? product.relatedProducts.filter((item) => item && item.name)
+    : [];
+  const hasRelatedProducts = relatedProducts.length > 0;
 
   return (
-    <article className="tc-print-product relative grid h-[430px] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[16px] border border-[#c4bcc0] bg-[#f3eff1] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
+    <article className="tc-print-product relative grid min-h-[430px] overflow-hidden rounded-[16px] border border-[#c4bcc0] bg-[#f3eff1] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.55)]">
       <ProductPreviewImage product={product} />
 
       <div className="min-h-0 pt-3">
@@ -1263,6 +1298,12 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
         <p className="mt-1 truncate text-[10.5px] font-bold text-[#756b70]">
           Art: {product.code || "—"} · Fab: {product.factoryCode || "—"}
         </p>
+
+        {showPricesInPreview ? (
+          <p className="mt-1 text-[11px] font-black text-[#A52E64]">
+            Precio: {product.price || "Gs. 0"}
+          </p>
+        ) : null}
 
         <h3 className="mt-3 line-clamp-3 text-[14px] font-black uppercase leading-tight tracking-[-0.04em] text-[#241f22]">
           {product.name}
@@ -1281,6 +1322,21 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
             Fila {product.row}
           </span>
         </div>
+
+        {hasRelatedProducts ? (
+          <div className="mt-3 rounded-[12px] border border-[#A52E64]/15 bg-[#A52E64]/5 px-3 py-2">
+            <p className="text-[8.5px] font-black uppercase tracking-[0.12em] text-[#A52E64]">
+              Componentes
+            </p>
+            <ul className="mt-1 grid max-h-[92px] gap-0.5 overflow-y-auto pr-1 text-[9.5px] font-bold leading-snug text-[#655c61]">
+              {relatedProducts.map((item) => (
+                <li key={item.id} className="break-words">
+                  {item.code ? `${item.code} - ${item.name}` : item.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
       <div className="tc-description-control mt-3 border-t border-[#d4cdd0] pt-3">
@@ -1314,6 +1370,19 @@ function ProductPreviewItem({ product }: { product: AddedProduct }) {
             {descriptionLines.map((line, index) => (
               <p key={`${product.id}-print-description-line-${index}`}>
                 • {line}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {hasRelatedProducts ? (
+        <div className="tc-print-description">
+          <div className="tc-print-description-title">Componentes</div>
+          <div className="tc-print-description-body">
+            {relatedProducts.map((item) => (
+              <p key={`${product.id}-related-${item.id}`}>
+                • {item.code ? `${item.code} - ${item.name}` : item.name}
               </p>
             ))}
           </div>
